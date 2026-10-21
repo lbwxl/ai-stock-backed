@@ -253,4 +253,13 @@ public class SysUserController extends BaseController
     {
         return success(deptService.selectDeptTreeList(dept));
     }
+
+    /**
+     * 查询用户下拉列表。
+     */
+    @GetMapping("/select/list")
+    public AjaxResult selectList()
+    {
+        return success(userService.list());
+    }
 }

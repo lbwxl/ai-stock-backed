@@ -124,4 +124,11 @@ public interface SysUserMapper
      * @return 结果
      */
     public SysUser checkEmailUnique(String email);
+
+    /**
+     * 查询用于下拉选择的用户编号及名称。
+     *
+     * @return 用户信息集合
+     */
+    public List<SysUser> selectList();
 }

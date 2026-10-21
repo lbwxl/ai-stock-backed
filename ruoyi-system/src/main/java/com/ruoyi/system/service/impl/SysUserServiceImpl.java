@@ -547,4 +547,13 @@ public class SysUserServiceImpl implements ISysUserService
         }
         return successMsg.toString();
     }
+
+    /**
+     * 查询用于下拉选择的用户编号及名称。
+     */
+    @Override
+    public List<SysUser> list()
+    {
+        return userMapper.selectList();
+    }
 }

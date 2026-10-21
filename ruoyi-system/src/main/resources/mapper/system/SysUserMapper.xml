@@ -220,4 +220,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         </foreach> 
  	</delete>
 	
+    <select id="selectList" resultType="com.ruoyi.common.core.domain.entity.SysUser">
+        select user_id as userId, user_name as userName from sys_user
+    </select>
 </mapper> 

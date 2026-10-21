@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.webui.mapper.AiServiceMapper">
+
+    <resultMap type="AiService" id="AiServiceResult">
+        <result property="id"    column="id"    />
+        <result property="serviceName"    column="service_name"    />
+        <result property="serviceUrl"    column="service_url"    />
+    </resultMap>
+
+    <sql id="selectAiServiceVo">
+        select id, service_name, service_url from ai_service
+    </sql>
+
+    <select id="selectAiServiceList" parameterType="AiService" resultMap="AiServiceResult">
+        <include refid="selectAiServiceVo"/>
+        <where>
+            <if test="serviceName != null  and serviceName != ''"> and service_name like concat('%', #{serviceName}, '%')</if>
+            <if test="serviceUrl != null  and serviceUrl != ''"> and service_url = #{serviceUrl}</if>
+        </where>
+    </select>
+
+    <select id="selectAiServiceById" parameterType="Long" resultMap="AiServiceResult">
+        <include refid="selectAiServiceVo"/>
+        where id = #{id}
+    </select>
+    <select id="selectList" resultType="com.ruoyi.webui.domain.AiService" resultMap="AiServiceResult">
+        <include refid="selectAiServiceVo"/>
+    </select>
+
+    <insert id="insertAiService" parameterType="AiService" useGeneratedKeys="true" keyProperty="id">
+        insert into ai_service
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="serviceName != null and serviceName != ''">service_name,</if>
+            <if test="serviceUrl != null and serviceUrl != ''">service_url,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="serviceName != null and serviceName != ''">#{serviceName},</if>
+            <if test="serviceUrl != null and serviceUrl != ''">#{serviceUrl},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiService" parameterType="AiService">
+        update ai_service
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="serviceName != null and serviceName != ''">service_name = #{serviceName},</if>
+            <if test="serviceUrl != null and serviceUrl != ''">service_url = #{serviceUrl},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteAiServiceById" parameterType="Long">
+        delete from ai_service where id = #{id}
+    </delete>
+
+    <delete id="deleteAiServiceByIds" parameterType="String">
+        delete from ai_service where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

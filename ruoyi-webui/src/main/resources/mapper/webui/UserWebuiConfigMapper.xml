@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.webui.mapper.UserWebuiConfigMapper">
+
+    <resultMap type="UserWebuiConfig" id="UserWebuiConfigResult">
+        <result property="id"    column="id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="aiServiceId"    column="ai_service_id"    />
+        <result property="aiServiceKey"    column="ai_service_key"    />
+        <result property="modelId"    column="model_id"    />
+        <result property="searchServiceId"    column="search_service_id"    />
+        <result property="searchServiceKey"    column="search_service_key"    />
+    </resultMap>
+
+    <sql id="selectUserWebuiConfig">
+        select id, user_id, ai_service_id, ai_service_key, model_id, search_service_id, search_service_key from user_webui_config
+    </sql>
+
+    <select id="selectUserWebuiConfigList" parameterType="UserWebuiConfig" resultType="UserWebuiConfigVo">
+        select uwc.id, uwc.user_id as userId, uwc.ai_service_id as aiServiceId, uwc.ai_service_key as aiServiceKey, uwc.model_id as modelId, uwc.search_service_id as searchServiceId, uwc.search_service_key as searchServiceKey,
+        su.user_name as userName, ase.service_name as serviceName,ss.service_name as searchServiceName,am.model_name as ModelName
+        from user_webui_config uwc
+        left join ai_service ase on ase.id = uwc.ai_service_id
+        left join ai_model am on am.id=uwc.model_id
+        left join search_service ss on uwc.search_service_id = ss.id
+        left join sys_user su on su.user_id=uwc.user_id
+        <where>
+            <if test="userId != null "> and uwc.user_id = #{userId}</if>
+            <if test="aiServiceId != null "> and uwc.ai_service_id = #{aiServiceId}</if>
+            <if test="aiServiceKey != null  and aiServiceKey != ''"> and uwc.ai_service_key = #{aiServiceKey}</if>
+            <if test="modelId != null "> and uwc.model_id = #{modelId}</if>
+            <if test="searchServiceId != null "> and uwc.search_service_id = #{searchServiceId}</if>
+            <if test="searchServiceKey != null  and searchServiceKey != ''"> and uwc.search_service_key = #{searchServiceKey}</if>
+        </where>
+    </select>
+
+    <select id="selectUserWebuiConfigById" parameterType="Long" resultMap="UserWebuiConfigResult">
+        <include refid="selectUserWebuiConfig"/>
+        where id = #{id}
+    </select>
+
+    <insert id="insertUserWebuiConfig" parameterType="UserWebuiConfig" useGeneratedKeys="true" keyProperty="id">
+        insert into user_webui_config
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="aiServiceId != null">ai_service_id,</if>
+            <if test="aiServiceKey != null">ai_service_key,</if>
+            <if test="modelId != null">model_id,</if>
+            <if test="searchServiceId != null">search_service_id,</if>
+            <if test="searchServiceKey != null">search_service_key,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="aiServiceId != null">#{aiServiceId},</if>
+            <if test="aiServiceKey != null">#{aiServiceKey},</if>
+            <if test="modelId != null">#{modelId},</if>
+            <if test="searchServiceId != null">#{searchServiceId},</if>
+            <if test="searchServiceKey != null">#{searchServiceKey},</if>
+         </trim>
+    </insert>
+
+    <update id="updateUserWebuiConfig" parameterType="UserWebuiConfig">
+        update user_webui_config
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="aiServiceId != null">ai_service_id = #{aiServiceId},</if>
+            <if test="aiServiceKey != null">ai_service_key = #{aiServiceKey},</if>
+            <if test="modelId != null">model_id = #{modelId},</if>
+            <if test="searchServiceId != null">search_service_id = #{searchServiceId},</if>
+            <if test="searchServiceKey != null">search_service_key = #{searchServiceKey},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteUserWebuiConfigById" parameterType="Long">
+        delete from user_webui_config where id = #{id}
+    </delete>
+
+    <delete id="deleteUserWebuiConfigByIds" parameterType="String">
+        delete from user_webui_config where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+
+
+
+    <resultMap id="SysLoginVoResult" type="com.ruoyi.webui.domain.vo.SysLoginVo">
+        <result property="userId" column="userId" />
+        <result property="username" column="userName" />
+        <association property="aiService" javaType="com.ruoyi.webui.domain.vo.AiServiceVo">
+            <result property="aiServiceId" column="aiServiceId" />
+            <result property="serviceName" column="serviceName" />
+            <result property="serviceUrl" column="serviceUrl" />
+            <result property="modelName" column="modelName" />
+            <result property="aiServiceKey" column="aiServiceKey" />
+        </association>
+        <association property="searchService" javaType="com.ruoyi.webui.domain.vo.SearchServiceVo">
+            <result property="searchServiceId" column="searchServiceId" />
+            <result property="searchServiceName" column="searchServiceName" />
+            <result property="searchServiceUrl" column="searchServiceUrl" />
+            <result property="searchEngineCx" column="searchEngineCx" />
+            <result property="searchServiceKey" column="searchServiceKey"/>
+        </association>
+
+    </resultMap>
+    <select id="selectList" resultMap="SysLoginVoResult">
+        select su.user_id             userId,
+               su.user_name           userName,
+            /* ai服务字段*/
+               ase.id                 aiServiceId,
+               ase.service_name       serviceName,
+               ase.service_url        serviceUrl,
+               am.model_name          modelName,
+               uwc.ai_service_key     aiServiceKey,
+            /* 搜索服务字段*/
+               ss.id                  searchServiceId,
+               ss.service_name        searchServiceName,
+               ss.service_url         searchServiceUrl,
+               ss.search_engine_cx    searchEngineCx,
+               uwc.search_service_key searchServiceKey
+        from user_webui_config uwc
+                 left join ai_service ase on ase.id = uwc.ai_service_id
+                 left join ai_model am on am.id = uwc.model_id
+                 left join search_service ss on uwc.search_service_id = ss.id
+                 left join sys_user su on su.user_id = uwc.user_id
+    </select>
+</mapper>

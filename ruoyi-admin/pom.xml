@@ -61,6 +61,11 @@
             <artifactId>ruoyi-generator</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.ruoyi.webui</groupId>
+            <artifactId>ruoyi-webui</artifactId>
+        </dependency>
+
     </dependencies>
 
     <build>

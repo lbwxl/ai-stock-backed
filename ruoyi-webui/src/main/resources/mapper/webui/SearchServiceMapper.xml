@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.webui.mapper.SearchServiceMapper">
+
+    <resultMap type="SearchService" id="SearchServiceResult">
+        <result property="id"    column="id"    />
+        <result property="serviceName"    column="service_name"    />
+        <result property="serviceUrl"    column="service_url"    />
+        <result property="searchEngineCx"    column="search_engine_cx"    />
+    </resultMap>
+
+    <sql id="selectSearchServiceVo">
+        select id, service_name, service_url, search_engine_cx from search_service
+    </sql>
+
+    <select id="selectSearchServiceList" parameterType="SearchService" resultMap="SearchServiceResult">
+        <include refid="selectSearchServiceVo"/>
+        <where>
+            <if test="serviceName != null  and serviceName != ''"> and service_name like concat('%', #{serviceName}, '%')</if>
+            <if test="serviceUrl != null  and serviceUrl != ''"> and service_url = #{serviceUrl}</if>
+            <if test="searchEngineCx != null  and searchEngineCx != ''"> and search_engine_cx = #{searchEngineCx}</if>
+        </where>
+    </select>
+
+    <select id="selectSearchServiceById" parameterType="Long" resultMap="SearchServiceResult">
+        <include refid="selectSearchServiceVo"/>
+        where id = #{id}
+    </select>
+    <select id="selectList" resultType="com.ruoyi.webui.domain.SearchService" resultMap="SearchServiceResult">
+        <include refid="selectSearchServiceVo"/>
+    </select>
+
+    <insert id="insertSearchService" parameterType="SearchService" useGeneratedKeys="true" keyProperty="id">
+        insert into search_service
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="serviceName != null and serviceName != ''">service_name,</if>
+            <if test="serviceUrl != null and serviceUrl != ''">service_url,</if>
+            <if test="searchEngineCx != null and searchEngineCx != ''">search_engine_cx,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="serviceName != null and serviceName != ''">#{serviceName},</if>
+            <if test="serviceUrl != null and serviceUrl != ''">#{serviceUrl},</if>
+            <if test="searchEngineCx != null and searchEngineCx != ''">#{searchEngineCx},</if>
+         </trim>
+    </insert>
+
+    <update id="updateSearchService" parameterType="SearchService">
+        update search_service
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="serviceName != null and serviceName != ''">service_name = #{serviceName},</if>
+            <if test="serviceUrl != null and serviceUrl != ''">service_url = #{serviceUrl},</if>
+            <if test="searchEngineCx != null and searchEngineCx != ''">search_engine_cx = #{searchEngineCx},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteSearchServiceById" parameterType="Long">
+        delete from search_service where id = #{id}
+    </delete>
+
+    <delete id="deleteSearchServiceByIds" parameterType="String">
+        delete from search_service where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.webui.mapper.AiModelMapper">
+
+    <resultMap type="AiModel" id="AiModelResult">
+        <result property="id"    column="id"    />
+        <result property="modelName"    column="model_name"    />
+        <result property="aiServiceId"    column="ai_service_id"    />
+    </resultMap>
+
+    <sql id="selectAiModelVo">
+        select id, model_name, ai_service_id from ai_model
+    </sql>
+
+    <select id="selectAiModelList" parameterType="AiModel" resultType="AiModelVo">
+        select am.id, am.model_name as modelName, am.ai_service_id as aiServiceId, ase.service_name as serviceName from ai_model am
+        left join ai_service ase on ase.id = am.ai_service_id
+        <where>
+            <if test="modelName != null  and modelName != ''"> and am.model_name like concat('%', #{modelName}, '%')</if>
+            <if test="aiServiceId != null "> and am.ai_service_id = #{aiServiceId}</if>
+        </where>
+    </select>
+
+    <select id="selectAiModelById" parameterType="Long" resultMap="AiModelResult">
+        <include refid="selectAiModelVo"/>
+        where id = #{id}
+    </select>
+    <select id="selectList" resultMap="AiModelResult">
+        <include refid="selectAiModelVo"/>
+    <where>
+        <if test="aiServiceId != null"> and ai_service_id = #{aiServiceId}</if>
+    </where>
+    </select>
+
+    <insert id="insertAiModel" parameterType="AiModel" useGeneratedKeys="true" keyProperty="id">
+        insert into ai_model
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="modelName != null and modelName != ''">model_name,</if>
+            <if test="aiServiceId != null">ai_service_id,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="modelName != null and modelName != ''">#{modelName},</if>
+            <if test="aiServiceId != null">#{aiServiceId},</if>
+         </trim>
+    </insert>
+
+    <update id="updateAiModel" parameterType="AiModel">
+        update ai_model
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="modelName != null and modelName != ''">model_name = #{modelName},</if>
+            <if test="aiServiceId != null">ai_service_id = #{aiServiceId},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteAiModelById" parameterType="Long">
+        delete from ai_model where id = #{id}
+    </delete>
+
+    <delete id="deleteAiModelByIds" parameterType="String">
+        delete from ai_model where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>
