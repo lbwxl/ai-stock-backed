@@ -3,6 +3,8 @@ package com.ruoyi.web.controller.common;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import javax.annotation.Resource;
 import javax.imageio.ImageIO;
 import javax.servlet.http.HttpServletResponse;
@@ -26,6 +28,7 @@ import com.ruoyi.system.service.ISysConfigService;
  * @author ruoyi
  */
 @RestController
+@Api(tags = "后台登录与权限")
 public class CaptchaController
 {
     @Resource(name = "captchaProducer")
@@ -43,6 +46,7 @@ public class CaptchaController
      * 生成验证码
      */
     @GetMapping("/captchaImage")
+    @ApiOperation(value = "获取登录验证码", notes = "返回 captchaEnabled、uuid 和 Base64 图片 img。启用验证码时，将图片中的结果与 uuid 一起提交给 /login。")
     public AjaxResult getCode(HttpServletResponse response) throws IOException
     {
         AjaxResult ajax = AjaxResult.success();

@@ -1,5 +1,7 @@
 package com.ruoyi.web.controller.webui;
 
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.utils.StringUtils;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Api(tags = "WebUI 登录")
 @RestController
 @RequestMapping(value={"/webui/auth"})
 public class WebUIController {

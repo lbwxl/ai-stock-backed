@@ -46,6 +46,24 @@ cd /Users/wxl/aigupiaofenxihoutaixitong
 NODE_OPTIONS=--openssl-legacy-provider npm run dev -- --port 1024
 ```
 
+## 在线接口文档与上传
+
+- Swagger UI：http://localhost:1024/dev-api/swagger-ui/index.html
+- OpenAPI 3 JSON：http://localhost:1024/dev-api/v3/api-docs
+- Swagger 2 JSON：http://localhost:1024/dev-api/v2/api-docs
+
+文档扫描项目内全部控制器，包含系统、监控、定时任务、代码生成、AI 业务和通用文件接口。使用上述前端代理地址进行在线调试，文档路径中的 `/dev-api` 与前端代理配置一致。
+
+需要认证的接口在 Swagger 页面点击 **Authorize**，填写 `Bearer <后台登录返回的 token>`。`/captchaImage`、`/login`、`/register` 本身不要求 JWT；管理接口仍执行原有权限校验。`GET /webui/config/current` 需要 JWT，只返回当前登录用户的配置，不要求配置管理菜单权限。原 `POST /webui/auth/in` 已注释停用。
+
+在 **通用文件上传下载** 分组中：
+
+- `POST /common/upload`：点击 **Try it out**，在 `file` 字段选择单个文件。
+- `POST /common/uploads`：点击 **Try it out**，在 `files` 字段点击 **Add item** 添加文件选择框，逐个选择文件；同名 multipart 字段依次提交。
+- 上传响应的 JSON 字段、示例值和下载路径在各接口的 Responses 中展示。
+
+默认每个文件最大 10MB，整个 multipart 请求最大 20MB；文件类型仍使用后端白名单，不支持分片上传或断点续传。
+
 ## 二次开发范围
 
 判断依据包括前端 `package.json` 的 `ruoyi` 名称、`3.9.0` 版本和官方仓库链接，以及 `/login`、`/captchaImage`、`/getInfo`、`/getRouters` 和 `/system/*` 接口。

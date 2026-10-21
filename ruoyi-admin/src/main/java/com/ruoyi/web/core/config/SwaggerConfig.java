@@ -3,12 +3,14 @@ package com.ruoyi.web.core.config;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import com.fasterxml.classmate.TypeResolver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import com.ruoyi.common.config.RuoYiConfig;
-import io.swagger.annotations.ApiOperation;
+import com.ruoyi.web.controller.domain.FileUploadResponse;
+import com.ruoyi.web.controller.domain.FilesUploadResponse;
 import io.swagger.models.auth.In;
 import springfox.documentation.builders.ApiInfoBuilder;
 import springfox.documentation.builders.PathSelectors;
@@ -24,7 +26,7 @@ import springfox.documentation.spi.service.contexts.SecurityContext;
 import springfox.documentation.spring.web.plugins.Docket;
 
 /**
- * Swagger2的接口配置
+ * OpenAPI 3 接口文档配置
  * 
  * @author ruoyi
  */
@@ -49,18 +51,18 @@ public class SwaggerConfig
     @Bean
     public Docket createRestApi()
     {
+        TypeResolver typeResolver = new TypeResolver();
         return new Docket(DocumentationType.OAS_30)
                 // 是否启用Swagger
                 .enable(enabled)
                 // 用来创建该API的基本信息，展示在文档的页面中（自定义展示的信息）
                 .apiInfo(apiInfo())
+                .additionalModels(typeResolver.resolve(FileUploadResponse.class),
+                        typeResolver.resolve(FilesUploadResponse.class))
                 // 设置哪些接口暴露给Swagger展示
                 .select()
-                // 扫描所有有注解的api，用这种方式更灵活
-                .apis(RequestHandlerSelectors.withMethodAnnotation(ApiOperation.class))
-                // 扫描指定包中的swagger注解
-                // .apis(RequestHandlerSelectors.basePackage("com.ruoyi.project.tool.swagger"))
-                // 扫描所有 .apis(RequestHandlerSelectors.any())
+                // 覆盖管理后台、二开业务、通用文件、定时任务及代码生成控制器。
+                .apis(RequestHandlerSelectors.basePackage("com.ruoyi"))
                 .paths(PathSelectors.any())
                 .build()
                 /* 设置安全模式，swagger可以设置访问token */
@@ -123,12 +125,15 @@ public class SwaggerConfig
         // 用ApiInfoBuilder进行定制
         return new ApiInfoBuilder()
                 // 设置标题
-                .title("标题：若依管理系统_接口文档")
+                .title("AI 服务管理后台接口文档")
                 // 描述
-                .description("使用 GET /captchaImage 获取验证码，再通过 POST /login 获取 JWT。"
-                        + "受保护接口在 Authorization 请求头中携带 Bearer 加空格及 token。"
-                        + "GET /webui/config/current 只返回当前登录用户的 AI 与搜索配置。"
-                        + "原 POST /webui/auth/in 已停用。")
+                .description("包含系统管理、监控、代码生成、AI 服务、模型、搜索服务、用户配置及文件上传下载。"
+                        + "\n\n在线调试：先调用 GET /captchaImage 获取验证码和 uuid，再通过 POST /login 登录；"
+                        + "点击 Authorize，填写 Bearer 加空格及返回的 token。"
+                        + "\n\n通用上传使用 multipart/form-data：单文件字段 file，多文件字段 files。"
+                        + "默认单文件最大 10MB，单次请求最大 20MB，支持文件类型白名单校验，不支持分片上传。"
+                        + "\n\nGET /webui/config/current 需要 Bearer token，只返回当前登录用户的 AI 与搜索配置。"
+                        + "原 POST /webui/auth/in 已停用，统一使用系统 POST /login 登录。")
                 // 作者信息
                 .contact(new Contact(ruoyiConfig.getName(), null, null))
                 // 版本

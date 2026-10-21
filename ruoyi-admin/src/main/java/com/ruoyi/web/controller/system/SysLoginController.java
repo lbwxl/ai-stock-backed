@@ -3,6 +3,8 @@ package com.ruoyi.web.controller.system;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +32,7 @@ import com.ruoyi.system.service.ISysMenuService;
  * @author ruoyi
  */
 @RestController
+@Api(tags = "后台登录与权限")
 public class SysLoginController
 {
     @Autowired
@@ -54,6 +57,7 @@ public class SysLoginController
      * @return 结果
      */
     @PostMapping("/login")
+    @ApiOperation(value = "后台账号登录", notes = "先获取 /captchaImage 的验证码图片及 uuid，填写图片验证码后提交。成功返回 token，在 Authorize 中填入 Bearer 加空格及 token。")
     public AjaxResult login(@RequestBody LoginBody loginBody)
     {
         AjaxResult ajax = AjaxResult.success();
@@ -70,6 +74,7 @@ public class SysLoginController
      * @return 用户信息
      */
     @GetMapping("getInfo")
+    @ApiOperation("获取当前用户、角色及权限")
     public AjaxResult getInfo()
     {
         LoginUser loginUser = SecurityUtils.getLoginUser();
@@ -98,6 +103,7 @@ public class SysLoginController
      * @return 路由信息
      */
     @GetMapping("getRouters")
+    @ApiOperation("获取当前用户的菜单路由")
     public AjaxResult getRouters()
     {
         Long userId = SecurityUtils.getUserId();

@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import com.ruoyi.common.config.RuoYiConfig;
@@ -20,6 +21,15 @@ import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.common.utils.file.FileUploadUtils;
 import com.ruoyi.common.utils.file.FileUtils;
 import com.ruoyi.framework.config.ServerConfig;
+import com.ruoyi.web.controller.domain.FileUploadResponse;
+import com.ruoyi.web.controller.domain.FilesUploadResponse;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 /**
  * 通用请求处理
@@ -27,6 +37,7 @@ import com.ruoyi.framework.config.ServerConfig;
  * @author ruoyi
  */
 @RestController
+@Api(tags = "通用文件上传下载")
 @RequestMapping("/common")
 public class CommonController
 {
@@ -44,7 +55,10 @@ public class CommonController
      * @param delete 是否删除
      */
     @GetMapping("/download")
-    public void fileDownload(String fileName, Boolean delete, HttpServletResponse response, HttpServletRequest request)
+    @ApiOperation(value = "下载生成的文件", notes = "下载文件后，可通过 delete 参数指定是否删除服务端文件。")
+    public void fileDownload(@ApiParam(value = "服务端下载目录中的文件名", required = true) String fileName,
+            @ApiParam(value = "下载后是否删除文件", required = true, example = "false") Boolean delete,
+            HttpServletResponse response, HttpServletRequest request)
     {
         try
         {
@@ -72,8 +86,16 @@ public class CommonController
     /**
      * 通用上传请求（单个）
      */
-    @PostMapping("/upload")
-    public AjaxResult uploadFile(MultipartFile file) throws Exception
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "上传单个文件",
+            description = "需要后台登录 token。表单字段名为 file，单文件最大 10MB。"
+            + "支持常见图片、Office 文档、PDF、TXT、HTML、ZIP/RAR/GZ/BZ2、MP4/AVI/RMVB。"
+            + "成功返回 code、msg、url、fileName、newFileName、originalFilename；不支持分片上传。",
+            responses = @ApiResponse(responseCode = "200", description = "上传结果，请检查业务状态码 code",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = FileUploadResponse.class))))
+    public AjaxResult uploadFile(@ApiParam(value = "选择要上传的文件", required = true)
+            @RequestPart("file") MultipartFile file) throws Exception
     {
         try
         {
@@ -98,8 +120,16 @@ public class CommonController
     /**
      * 通用上传请求（多个）
      */
-    @PostMapping("/uploads")
-    public AjaxResult uploadFiles(List<MultipartFile> files) throws Exception
+    @PostMapping(value = "/uploads", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "上传多个文件",
+            description = "需要后台登录 token。使用同名 files 字段提交多个文件。"
+            + "每个文件最大 10MB，整个 multipart 请求最大 20MB，支持类型与单文件上传相同。"
+            + "返回 urls、fileNames、newFileNames、originalFilenames，均为逗号分隔的字符串；不支持分片上传。",
+            responses = @ApiResponse(responseCode = "200", description = "上传结果，请检查业务状态码 code",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = FilesUploadResponse.class))))
+    public AjaxResult uploadFiles(@ApiParam(value = "选择要上传的多个文件", required = true)
+            @RequestPart("files") List<MultipartFile> files) throws Exception
     {
         try
         {
@@ -136,7 +166,9 @@ public class CommonController
      * 本地资源通用下载
      */
     @GetMapping("/download/resource")
-    public void resourceDownload(String resource, HttpServletRequest request, HttpServletResponse response)
+    @ApiOperation(value = "下载已上传的资源", notes = "resource 使用上传返回的 fileName，例如 /profile/upload/年/月/日/文件名。")
+    public void resourceDownload(@ApiParam(value = "上传接口返回的 fileName", required = true) String resource,
+            HttpServletRequest request, HttpServletResponse response)
             throws Exception
     {
         try
