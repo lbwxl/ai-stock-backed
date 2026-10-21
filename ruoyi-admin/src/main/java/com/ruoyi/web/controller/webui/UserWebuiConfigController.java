@@ -1,5 +1,6 @@
 package com.ruoyi.web.controller.webui;
 
+import io.swagger.annotations.ApiOperation;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
@@ -7,6 +8,7 @@ import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.webui.domain.UserWebuiConfig;
+import com.ruoyi.webui.domain.vo.SysLoginVo;
 import com.ruoyi.webui.domain.vo.UserWebuiConfigVo;
 import com.ruoyi.webui.service.IUserWebuiConfigService;
 import java.util.List;
@@ -27,6 +29,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserWebuiConfigController extends BaseController {
     @Autowired
     private IUserWebuiConfigService userWebuiConfigService;
+
+    @ApiOperation(value = "查询当前登录用户的 AI 与搜索配置", notes = "需要 Bearer JWT，只根据登录身份查询，不接受用户 ID。不要求配置管理权限；未配置时返回当前用户身份及空的服务配置。")
+    @GetMapping("/current")
+    public AjaxResult current() {
+        SysLoginVo config = this.userWebuiConfigService.selectUserConfigByUserId(getUserId());
+        if (config == null) {
+            config = new SysLoginVo();
+        }
+        config.setUserId(getUserId());
+        config.setUsername(getUsername());
+        return this.success(config);
+    }
 
     @PreAuthorize(value="@ss.hasPermi('webui:config:list')")
     @GetMapping(value={"/list"})

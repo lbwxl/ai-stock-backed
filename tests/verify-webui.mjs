@@ -137,38 +137,28 @@ try {
   });
 
   // Run before fixture config creation: no existing user configuration is changed.
-  await check('webui auth success and validation failures', async () => {
-    const success = await ok('/webui/auth/in', {
-      method: 'POST', anonymous: true, body: { username: 'admin', password: 'admin123' }
-    });
-    assert.ok(success.data && typeof success.data === 'object', 'Missing auth payload');
+  await check('current user config requires JWT and matches login identity', async () => {
+    const anonymous = await request('/webui/config/current', { anonymous: true });
+    assert.equal(anonymous.code, 401, 'Anonymous current config request allowed');
+    const success = await ok('/webui/config/current');
     const account = (await ok('/getInfo')).user;
+    assert.equal(success.data.userId, account.userId, 'Config user identity mismatch');
+    assert.equal(success.data.username, account.userName, 'Config username mismatch');
     const configured = (await list('config', { userId: account.userId })).rows;
     if (configured.length) {
-      assert.equal(success.data.userId, account.userId, 'Auth user mapping missing');
-      assert.equal(success.data.username, account.userName, 'Auth username mapping missing');
       assert.ok(configured.some(row =>
         row.aiServiceId === success.data.aiService?.aiServiceId &&
         row.aiServiceKey === success.data.aiService?.aiServiceKey &&
         row.modelName === success.data.aiService?.modelName &&
         row.serviceName === success.data.aiService?.serviceName &&
         row.searchServiceId === success.data.searchService?.searchServiceId &&
-        row.searchServiceKey === success.data.searchService?.searchServiceKey &&
-        row.searchServiceName === success.data.searchService?.searchServiceName
-      ), 'Auth joined configuration mapping missing');
+        row.searchServiceKey === success.data.searchService?.searchServiceKey
+      ), 'Joined configuration mapping mismatch');
     }
-    for (const body of [
-      { username: '', password: '' }, { username: 'admin', password: '1234' },
-      { username: 'a', password: 'admin123' },
-      { username: 'admin', password: 'wrong_local_password' }
-    ]) {
-      const rejected = await request('/webui/auth/in', { method: 'POST', anonymous: true, body });
-      assert.equal(rejected.code, 400, 'Invalid credentials accepted');
-    }
-    // Reset any local failed-password counter by authenticating correctly again.
-    await ok('/webui/auth/in', {
-      method: 'POST', anonymous: true, body: { username: 'admin', password: 'admin123' }
+    const retired = await request('/webui/auth/in', {
+      method: 'POST', body: { username: 'admin', password: 'admin123' }, raw: true
     });
+    assert.equal(retired.status, 404, 'Retired login route is still mapped');
   });
 
   const profile = await ok('/getInfo');
@@ -231,7 +221,7 @@ try {
 
   await check('user config create detail filters pagination joins update', async () => {
     // Only insert a fresh row linked to fixture services. Never update an existing
-    // configuration, and do not call webui auth while the extra row exists.
+    // configuration, and do not query current config while the extra row exists.
     config = await create('config', {
       userId, aiServiceId: service.id, modelId: model.id, searchServiceId: search.id,
       aiServiceKey: `${prefix}_dummy_ai`, searchServiceKey: `${prefix}_dummy_search`

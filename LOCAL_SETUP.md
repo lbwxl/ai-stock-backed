@@ -52,7 +52,7 @@ NODE_OPTIONS=--openssl-legacy-provider npm run dev -- --port 1024
 
 已根据用户提供的 `/Users/wxl/Downloads/ruoyi-admin.jar` 还原二开源码：新增 `ruoyi-webui` Maven 模块、5 个业务控制器和登录 DTO，补齐 `/webui/config/*`、`/webui/model/*`、`/webui/service/*`、`/webui/search/*`、`POST /webui/auth/in` 以及 `GET /system/user/select/list`，共 29 个 HTTP 方法与路径组合。
 
-这些接口使用当前本地 `ry-vue` 数据库。`/webui/auth/in` 按原包逻辑校验账号密码并返回该用户的 AI、模型及搜索配置；后台管理登录仍使用 `/login` 获取 JWT。AI 供应商和搜索供应商配置由本地数据决定，管理后端本身不发起模型推理或搜索请求。
+这些接口使用当前本地 `ry-vue` 数据库。当前已统一使用原生 `POST /login` 获取 JWT，并通过 `GET /webui/config/current` 获取当前用户的 AI、模型及搜索配置；`POST /webui/auth/in` 的映射已注释停用并移出匿名白名单。AI 供应商和搜索供应商配置由本地数据决定，管理后端本身不发起模型推理或搜索请求。
 
 还原依据、必要适配及验证结果见 [WEBUI_RESTORE.md](WEBUI_RESTORE.md)。可重新执行集成检查：
 
@@ -63,3 +63,21 @@ BASE_URL=http://localhost:1024/dev-api node tests/verify-webui.mjs
 ```
 
 测试仅写入唯一命名的测试记录并在结束时删除；现有业务行不参与修改。测试会产生正常的登录及操作日志。
+
+## 分析工具登录流程
+
+`/Users/wxl/ai-stock-analysis-tool` 使用 `NUXT_PUBLIC_API_BASE_URL` 指定业务后端，默认 `http://127.0.0.1:18080`。
+
+1. `GET /captchaImage` 获取系统验证码（根据 `captchaEnabled` 显示或隐藏）。
+2. `POST /login` 提交用户名、密码、验证码 `code` 和 `uuid`，获取原生 JWT。
+3. 浏览器将 JWT 保存到独立的 `research-token` Cookie，业务请求统一通过 `Authorization: Bearer <token>` 发送。
+4. `GET /webui/config/current` 根据 JWT 身份查询数据库，忽略外部传入的用户 ID；没有配置时返回身份和空配置。
+5. 业务响应 `code: 401` 或 HTTP 401 时清除本地 token 与供应商配置，返回登录页；403 保留登录状态。退出调用原生 `/logout` 使 token 失效。
+
+AI 与搜索供应商请求继续使用各自的 API Key，不使用业务 JWT。旧固定管理员登录逻辑已移除。
+
+认证集成检查（验证码只读取本地 Redis 中本次测试生成的值，不关闭系统验证码）：
+
+```bash
+node tests/verify-auth.mjs
+```

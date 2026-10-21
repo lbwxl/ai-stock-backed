@@ -1,6 +1,7 @@
 package com.ruoyi.web.core.config;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -87,9 +88,18 @@ public class SwaggerConfig
         securityContexts.add(
                 SecurityContext.builder()
                         .securityReferences(defaultAuth())
-                        .operationSelector(o -> o.requestMappingPattern().matches("/.*"))
+                        .operationSelector(o -> requiresAuthorization(o.requestMappingPattern()))
                         .build());
         return securityContexts;
+    }
+
+    private boolean requiresAuthorization(String requestPath)
+    {
+        if (pathMapping != null && !pathMapping.isEmpty() && requestPath.startsWith(pathMapping + "/"))
+        {
+            requestPath = requestPath.substring(pathMapping.length());
+        }
+        return !Arrays.asList("/", "/login", "/register", "/captchaImage").contains(requestPath);
     }
 
     /**
@@ -115,7 +125,10 @@ public class SwaggerConfig
                 // 设置标题
                 .title("标题：若依管理系统_接口文档")
                 // 描述
-                .description("描述：用于管理集团旗下公司的人员信息,具体包括XXX,XXX模块...")
+                .description("使用 GET /captchaImage 获取验证码，再通过 POST /login 获取 JWT。"
+                        + "受保护接口在 Authorization 请求头中携带 Bearer 加空格及 token。"
+                        + "GET /webui/config/current 只返回当前登录用户的 AI 与搜索配置。"
+                        + "原 POST /webui/auth/in 已停用。")
                 // 作者信息
                 .contact(new Contact(ruoyiConfig.getName(), null, null))
                 // 版本

@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
 public interface UserWebuiConfigMapper {
+    public SysLoginVo selectUserConfigByUserId(Long userId);
+
     public UserWebuiConfig selectUserWebuiConfigById(Long id);
 
     public List<UserWebuiConfigVo> selectUserWebuiConfigList(UserWebuiConfig userWebuiConfig);

@@ -29,7 +29,10 @@ public class WebUIController {
     @Resource
     private AuthenticationManager authenticationManager;
 
-    @PostMapping(value={"/in"})
+    // 已停用二开登录接口，保留旧实现供参考。统一使用 POST /login 获取 JWT，
+    // 再携带 Bearer token 调用 GET /webui/config/current 获取当前用户配置。
+    // @ApiOperation(value = "校验账号并获取 AI 与搜索配置")
+    // @PostMapping(value={"/in"})
     public AjaxResult login(@RequestBody AuthDto dto) {
         String username = dto.getUsername();
         String password = dto.getPassword();

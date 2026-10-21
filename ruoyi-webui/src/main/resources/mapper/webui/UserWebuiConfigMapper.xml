@@ -107,7 +107,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         </association>
 
     </resultMap>
-    <select id="selectList" resultMap="SysLoginVoResult">
+    <sql id="selectJoinedUserConfig">
         select su.user_id             userId,
                su.user_name           userName,
             /* ai服务字段*/
@@ -127,5 +127,16 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
                  left join ai_model am on am.id = uwc.model_id
                  left join search_service ss on uwc.search_service_id = ss.id
                  left join sys_user su on su.user_id = uwc.user_id
+    </sql>
+
+    <select id="selectList" resultMap="SysLoginVoResult">
+        <include refid="selectJoinedUserConfig"/>
+    </select>
+
+    <select id="selectUserConfigByUserId" parameterType="Long" resultMap="SysLoginVoResult">
+        <include refid="selectJoinedUserConfig"/>
+        where uwc.user_id = #{userId}
+        order by uwc.id
+        limit 1
     </select>
 </mapper>

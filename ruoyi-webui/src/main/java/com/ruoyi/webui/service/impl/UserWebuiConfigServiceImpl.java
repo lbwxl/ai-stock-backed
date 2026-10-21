@@ -1,6 +1,7 @@
 package com.ruoyi.webui.service.impl;
 
 import com.ruoyi.webui.domain.UserWebuiConfig;
+import com.ruoyi.webui.domain.vo.SysLoginVo;
 import com.ruoyi.webui.domain.vo.UserWebuiConfigVo;
 import com.ruoyi.webui.mapper.UserWebuiConfigMapper;
 import com.ruoyi.webui.service.IUserWebuiConfigService;
@@ -12,6 +13,11 @@ import org.springframework.stereotype.Service;
 public class UserWebuiConfigServiceImpl implements IUserWebuiConfigService {
     @Autowired
     private UserWebuiConfigMapper userWebuiConfigMapper;
+
+    @Override
+    public SysLoginVo selectUserConfigByUserId(Long userId) {
+        return this.userWebuiConfigMapper.selectUserConfigByUserId(userId);
+    }
 
     @Override
     public UserWebuiConfig selectUserWebuiConfigById(Long id) {
