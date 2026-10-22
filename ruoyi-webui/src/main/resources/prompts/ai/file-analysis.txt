@@ -1,0 +1,13 @@
+文件名：{{fileName}}
+声明的文件类型：{{mimeType}}
+文件大小（字节）：{{fileSize}}
+文件临时授权 URL（直接读取此链接，禁止在结果中泄露链接）：{{fileUrl}}
+附件状态：{{attachmentStatus}}
+
+用户的文件处理要求：
+{{processingRequirement}}
+
+用户的内容分析要求：
+{{analysisRequirement}}
+
+请自行判断是否需要外部文件分析工具，完成上述要求后返回分析结果。

@@ -1,0 +1,7 @@
+Given the following contents from a SERP search for the query <query>{{query}}</query>, extract {{learningCount}} key learnings from the contents. Make sure each learning is unique and not similar to each other. The learnings should be as detailed and information dense as possible. Include any entities like people, places, companies, products, things, etc in the learnings, as well as any exact metrics, numbers, or dates. Also generate up to {{followUpCount}} follow-up questions that could help explore this topic further.
+
+<contents>{{contents}}</contents>
+
+You MUST respond in JSON matching this JSON schema: {"type":"object","properties":{"learnings":{"type":"array","maxItems":{{learningCount}},"items":{"type":"object","properties":{"url":{"type":"string","description":"The source URL from which this learning was extracted"},"learning":{"type":"string","description":"A detailed, information-dense insight extracted from the search results. Include specific entities, metrics, numbers, and dates when available"}},"required":["url","learning"],"additionalProperties":false}},"followUpQuestions":{"type":"array","maxItems":{{followUpCount}},"items":{"type":"string"}}},"required":["learnings","followUpQuestions"],"additionalProperties":false}
+
+{{language}}

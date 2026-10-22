@@ -140,6 +140,11 @@ try {
   await check('current user config requires JWT and matches login identity', async () => {
     const anonymous = await request('/webui/config/current', { anonymous: true });
     assert.equal(anonymous.code, 401, 'Anonymous current config request allowed');
+    const anonymousAnalysis = await request('/webui/ai/chat/completions', {
+      method: 'POST', anonymous: true,
+      body: { scene: 'feedback', query: 'fixture', questionCount: 1 }
+    });
+    assert.equal(anonymousAnalysis.code, 401, 'Anonymous AI request allowed');
     const success = await ok('/webui/config/current');
     const account = (await ok('/getInfo')).user;
     assert.equal(success.data.userId, account.userId, 'Config user identity mismatch');
@@ -148,12 +153,13 @@ try {
     if (configured.length) {
       assert.ok(configured.some(row =>
         row.aiServiceId === success.data.aiService?.aiServiceId &&
-        row.aiServiceKey === success.data.aiService?.aiServiceKey &&
         row.modelName === success.data.aiService?.modelName &&
         row.serviceName === success.data.aiService?.serviceName &&
         row.searchServiceId === success.data.searchService?.searchServiceId &&
         row.searchServiceKey === success.data.searchService?.searchServiceKey
       ), 'Joined configuration mapping mismatch');
+      assert.ok(success.data.aiService?.aiServiceKey == null, 'AI key exposed to browser');
+      assert.ok(success.data.aiService?.serviceUrl == null, 'AI upstream URL exposed to browser');
     }
     const retired = await request('/webui/auth/in', {
       method: 'POST', body: { username: 'admin', password: 'admin123' }, raw: true

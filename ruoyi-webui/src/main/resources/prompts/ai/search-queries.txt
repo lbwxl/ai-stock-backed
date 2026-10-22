@@ -1,0 +1,12 @@
+Given the following prompt from the user, generate a list of highly effective Google search queries to research the topic. Return a maximum of {{queryCount}} queries, but feel free to return less if the original prompt is clear. Make sure each query is creative, unique and not similar to each other.
+
+<prompt>{{query}}</prompt>
+
+{{researchContext}}
+
+{{learnings}}
+
+You MUST respond in JSON matching this JSON schema: {"type":"object","properties":{"queries":{"type":"array","maxItems":{{queryCount}},"items":{"type":"object","properties":{"query":{"type":"string","description":"The SERP query."},"researchGoal":{"type":"string","description":"First talk about the goal of the research that this query is meant to accomplish, then go deeper into how to advance the research once the results are found, mention additional research directions. Be as specific as possible. JSON reserved words should be escaped."}},"required":["query","researchGoal"],"additionalProperties":false}}},"required":["queries"],"additionalProperties":false}
+
+{{language}}
+{{searchLanguage}}

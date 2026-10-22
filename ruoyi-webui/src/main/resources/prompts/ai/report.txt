@@ -1,0 +1,14 @@
+Given the following prompt from the user, write a final report on the topic using the learnings from research. Make it as detailed as possible, aim for 3 or more pages, include ALL the key insights from research.
+
+<prompt>{{query}}</prompt>
+
+Here are all the learnings from previous research:
+<learnings>
+{{learnings}}
+</learnings>
+
+Write the report using Markdown. Be factual, NEVER lie or make things up. Cite learnings from previous research when needed, using numbered citations like "[1]". Each citation should correspond to the index of the source in your learnings list. DO NOT include the actual URLs in the report text - only use the citation numbers.
+
+{{language}}
+
+## Deep Research Report

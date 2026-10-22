@@ -7,11 +7,12 @@
 ## 启动与停止
 
 ```bash
-cd /Users/wxl/RuoYi-Vue
+cd /Users/wxl/ai-stock-backend
 ./start-local.sh
 ```
 
-首次启动会初始化项目专用的 MySQL 数据目录，导入用户提供的 `/Users/wxl/Downloads/ry-vue.sql`，并编译后端。可以通过 `RUOYI_SEED_SQL` 指定其他本地 SQL 文件。再次启动会保留现有数据，不会重复导入。
+本项目现在独立管理 MySQL、Redis、后端和上传文件。已有数据、私有连接配置、持久化文件都在本仓库 `.local/` 内，不再依赖旧仓库。启动脚本只使用已有数据库，不初始化数据，也不重新导入 SQL；后端启动前会重新构建当前代码，避免使用旧 JAR。已启动的服务会复用，端口被其他项目占用时会明确报错。
+
 
 - 后端：http://127.0.0.1:18080
 - 前端：http://localhost:1024
@@ -21,13 +22,41 @@ cd /Users/wxl/RuoYi-Vue
 - Redis：`127.0.0.1:6379`
 - 数据、上传文件和随机生成的本地凭据位于忽略提交的 `.local/` 中。
 
+默认只停止当前项目的后端，保留数据库和 Redis：
+
 ```bash
 ./stop-local.sh
 ```
 
-停止脚本只停止本项目启动的后端、Redis 和 MySQL。服务没有注册为系统开机启动项。
+需要停止全部本项目服务时：
+
+```bash
+./stop-local.sh --all
+```
+
+停止脚本先校验进程及数据目录，正常保存数据后退出，不删除数据。IDEA 与脚本只保留一个后端进程。
 
 ## 依赖与重新编译
+
+### IDEA 启动重新克隆的项目
+
+业务代码相同并不代表本地配置相同：`.local/` 被 Git 忽略，克隆不会带上数据库凭据、上传文件或数据库数据。直接运行 `RuoYiApplication` 只激活默认 `druid` 配置，会使用 `application-druid.yml` 中的示例 `root / password`。
+
+本机 `/Users/wxl/ai-stock-backend` 已准备私有 `.local/application-local.yml`，数据库、Redis 数据、JWT 密钥和上传目录均已迁入当前项目，无需重新导入 SQL。先运行以下命令启动数据库和 Redis，再在 IDEA 运行配置中选择 **RuoYi-local**，使用 `ruoyi-admin` 模块启动：
+
+```bash
+./start-local.sh --deps-only
+```
+
+若脚本启动的后端还在运行，先执行 `./stop-local.sh` 释放端口。IDEA 工作目录为项目根目录，参数为：
+
+```text
+--spring.profiles.active=druid,local --spring.config.additional-location=file:./.local/
+```
+
+启动日志应同时出现 `druid`、`local` 两个 profile，后端端口为 `18080`。同一时间只运行一个后端实例。当前 MySQL 数据目录是 `.local/mysql`，Redis 数据目录是 `.local/redis`，上传目录是 `.local/uploads`，三者均属于本项目。
+
+其他机器克隆后，需要准备对应的 `.local/application-local.yml`、数据库数据和 Redis 配置；启动脚本发现缺失时会停止，不会新建空库。运行配置不包含数据库密码，私有配置不得提交。
 
 MySQL 8.4 与 Redis 使用 Homebrew 安装。当前 Java 使用本机 PyCharm 自带的 JBR 25，已用于构建和启动；脚本也支持通过 `RUOYI_JAVA_HOME` 指定 Java 路径，或自动使用已安装的 Homebrew JDK 17。Maven 3.9.9 位于 `/Users/wxl/.local/share/aigupiao-tools/apache-maven-3.9.9`。
 
@@ -70,12 +99,12 @@ NODE_OPTIONS=--openssl-legacy-provider npm run dev -- --port 1024
 
 已根据用户提供的 `/Users/wxl/Downloads/ruoyi-admin.jar` 还原二开源码：新增 `ruoyi-webui` Maven 模块、5 个业务控制器和登录 DTO，补齐 `/webui/config/*`、`/webui/model/*`、`/webui/service/*`、`/webui/search/*`、`POST /webui/auth/in` 以及 `GET /system/user/select/list`，共 29 个 HTTP 方法与路径组合。
 
-这些接口使用当前本地 `ry-vue` 数据库。当前已统一使用原生 `POST /login` 获取 JWT，并通过 `GET /webui/config/current` 获取当前用户的 AI、模型及搜索配置；`POST /webui/auth/in` 的映射已注释停用并移出匿名白名单。AI 供应商和搜索供应商配置由本地数据决定，管理后端本身不发起模型推理或搜索请求。
+这些接口使用当前本地 `ry-vue` 数据库。当前已统一使用原生 `POST /login` 获取 JWT，并通过 `GET /webui/config/current` 获取当前用户的 AI、模型及搜索配置；`POST /webui/auth/in` 的映射已注释停用并移出匿名白名单。AI 供应商和搜索供应商配置由本地数据决定；后端通过 `/webui/ai/chat/completions` 执行模型调用，搜索维持原流程。
 
 还原依据、必要适配及验证结果见 [WEBUI_RESTORE.md](WEBUI_RESTORE.md)。可重新执行集成检查：
 
 ```bash
-cd /Users/wxl/RuoYi-Vue
+cd /Users/wxl/ai-stock-backend
 node tests/verify-webui.mjs
 BASE_URL=http://localhost:1024/dev-api node tests/verify-webui.mjs
 ```
@@ -92,10 +121,37 @@ BASE_URL=http://localhost:1024/dev-api node tests/verify-webui.mjs
 4. `GET /webui/config/current` 根据 JWT 身份查询数据库，忽略外部传入的用户 ID；没有配置时返回身份和空配置。
 5. 业务响应 `code: 401` 或 HTTP 401 时清除本地 token 与供应商配置，返回登录页；403 保留登录状态。退出调用原生 `/logout` 使 token 失效。
 
-AI 与搜索供应商请求继续使用各自的 API Key，不使用业务 JWT。旧固定管理员登录逻辑已移除。
+AI 分析请求通过业务 JWT 访问后端，由后端读取当前用户的供应商密钥；搜索服务维持原有调用流程。旧固定管理员登录逻辑已移除。
 
 认证集成检查（验证码只读取本地 Redis 中本次测试生成的值，不关闭系统验证码）：
 
 ```bash
 node tests/verify-auth.mjs
 ```
+
+
+## AI 接口 404 与供应商重定向排查
+
+2026-10-22 实际排查确认：`18080` 被旧仓库 JAR 占用时，新项目会报端口冲突并退出，前端调用新增 AI 接口返回 404。可用 `lsof -nP -iTCP:18080 -sTCP:LISTEN` 找到 PID，再用 `ps -p <PID> -o command=` 确认运行目录。停止旧后端后，只启动当前项目。
+
+DeepSeek 服务地址应使用 `https://api.deepseek.com/v1`。原 HTTP 地址会返回 302；后端不会携带供应商密钥自动跟随跳转，应在后台服务管理中直接配置最终 HTTPS 地址。
+
+本次已切换到当前项目的 JAR，后台启动日志为 `.local/logs/backend-console.log`，PID 保存在 `.local/backend.pid`；如果改用 IDEA 启动，应先停止这个后台进程以释放端口。两种方式都复用相同私有配置，不重新初始化数据库。
+
+
+## 2026-10-22 本地数据迁移
+
+已从恢复后的旧项目复制 MySQL 数据、Redis 持久化数据和上传文件，并逐文件校验。迁移前的独立备份位于 `.local/backups/migration-20261022/`；旧目录保持原样。私有后端配置、Redis 配置、数据库进程的路径均已改为本项目。旧项目可以移除，当前服务不再使用它的数据目录。
+
+迁移前 MySQL 因目录移入废纸篓而异常退出，复制后的数据库已完成 InnoDB/XA 恢复，34 张业务表、5 条用户配置及 8 个用户均可读取。Redis 迁移前的 19 个键和登录会话保留。
+
+
+## 提示词维护
+
+系统和业务提示词位于 `ruoyi-webui/src/main/resources/prompts/ai/`，包括补充问题、搜索词、搜索结果分析和报告四个场景。前端只提交业务数据，后端构造消息、输出规则和生成参数。调整模板后停止后端、重新构建再启动即可。接口参数见 [AI_ANALYSIS_API.md](AI_ANALYSIS_API.md)。
+
+## 文件分析私有上传
+
+原始文件默认保存在当前项目 `.local/ai-files/`，按用户和随机 UUID 隔离，默认有效期 24 小时。此目录不挂在 `/profile` 等公开资源路径下。分析接口验证文件归属后生成临时签名 URL，模型服务直接下载原文件，模型请求不内嵌字节。生产配置 `webui.file-analysis.public-base-url`；本地可用 `./start-file-tunnel.sh` 启动仅暴露签名下载接口的 ngrok 隧道，也可使用 `./start-file-tunnel.sh cloudflare` 启动 Cloudflare 临时隧道，执行 `./stop-file-tunnel.sh` 停止。存储路径和保留时间可通过 `webui.file-analysis.storage-path`、`retention-seconds` 配置，详见 [FILE_ANALYSIS_API.md](FILE_ANALYSIS_API.md)。
+
+文件隧道由本项目守护进程维护：进程退出、临时域名撤销或公网健康检查失败时自动重建，并更新 `.local/file-tunnel-url`；状态见 `.local/file-tunnel-status.json`。分析前校验文件 URL，只做 HEAD 网络检查；不可达时返回明确的 503，恢复后可直接重试已有文件。

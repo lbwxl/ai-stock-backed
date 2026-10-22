@@ -77,3 +77,8 @@ REA 工具来源：[morluto/rea](https://github.com/morluto/rea)。本次使用�
 ## 原生登录改造
 
 上述 `/webui/auth/in` 是还原时的行为记录。当前该方法的 HTTP 映射已注释停用，且已从匿名白名单移除。分析工具与后台统一使用 `/captchaImage` 加 `/login` 获取原生 JWT，再携带 `Authorization: Bearer <token>` 请求新的 `GET /webui/config/current`。配置查询在 SQL 中按认证用户 ID 过滤，不接受请求指定用户；原有配置管理权限保持不变。
+
+
+## AI 分析调用链更新
+
+新增 `POST /webui/ai/chat/completions`，根据 JWT 登录用户读取 AI 配置并调用第三方，支持 JSON 和 SSE。`GET /webui/config/current` 不再下发 AI 密钥及服务地址。上方关于“没有模型推理代理接口”的描述仅为还原时的记录，当前接口说明与验证方式见 [AI_ANALYSIS_API.md](AI_ANALYSIS_API.md)。
