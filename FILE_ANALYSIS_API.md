@@ -4,7 +4,7 @@
 
 ## 调用流程
 
-1. 浏览器先调用上传接口保存原文件，取得私有 `fileUrl`。开始分析时，通过 JSON 提交此 URL 和两项业务要求，携带业务登录 JWT。
+1. 浏览器先调用上传接口保存原文件，取得完整的临时签名 `fileUrl` 和 `fileId`。开始分析时，通过 JSON 提交此 URL 和两项业务要求，携带业务登录 JWT。
 2. 后端验证文件归属和有效期，读取元数据并生成临时签名 URL；从登录身份读取用户模型配置，组装服务端提示词、URL 附件及工具定义。模型请求不加载或内嵌原文件。发送模型请求前用 HEAD 校验临时链接的 HTTP 状态、Content-Type 和长度，不读取文件正文；链接返回隧道错误页、重定向、类型不符或长度不符时，返回 `503 FILE_URL_UNREACHABLE`，不会误转入外部工具。若模型拒绝附件，会再次检查链接，区分网络故障与模型能力限制。
 3. 模型直接返回内容时，返回分析结果。
 4. 模型返回 `analyze_uploaded_file` 工具调用时，后端才将同一份文件的临时授权 URL 交给预留的 `FileAnalysisTool`。工具结果交回同一个用户配置的模型，由模型形成最终结果。
@@ -26,15 +26,18 @@
 
 ```json
 {
-  "fileUrl": "/webui/file-analysis/files/12345678-1234-1234-1234-123456789abc",
+  "fileUrl": "https://files.example.com/ai-file/file-analysis/1/12345678-1234-1234-1234-123456789abc?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=...",
+  "fileId": "12345678-1234-1234-1234-123456789abc",
   "fileName": "example.pdf",
   "mimeType": "application/pdf",
   "size": 102400,
-  "expiresAt": 1792713600000
+  "expiresAt": 1792713600000,
+  "urlExpiresAt": 1792629000000,
+  "requestId": "请求 UUID"
 }
 ```
 
-`expiresAt` 为过期时间的 Unix 毫秒数。此 URL 是业务后端的私有相对资源地址，分析请求应原样传回。默认保存 24 小时；文件删除或过期前可以重复分析，不必重复上传。
+`expiresAt` 为文件过期时间的 Unix 毫秒数，默认保存 24 小时。`fileUrl` 为完整的 MinIO 临时签名 GET 地址，可直接访问，不需业务 JWT；默认约 30 分钟有效，`urlExpiresAt` 为链接过期时间。分析请求原样提交 `fileUrl`，后端校验归属后签发新的模型访问链接，因此旧签名过期但文件未过期时仍可再次分析。`fileId` 用于业务后端的私有下载和删除，`requestId` 可检索本次上传日志。
 
 ### 再分析
 
@@ -42,13 +45,13 @@
 
 ```json
 {
-  "fileUrl": "/webui/file-analysis/files/12345678-1234-1234-1234-123456789abc",
+  "fileUrl": "https://files.example.com/ai-file/file-analysis/1/12345678-1234-1234-1234-123456789abc?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=...",
   "processingRequirement": "保持原文件，阅读全部内容",
   "analysisRequirement": "分析并总结重点"
 }
 ```
 
-三个字段均必填；处理要求与分析要求各最多 10000 字符。仅接受上述字段，不接受二进制、Base64、用户 ID、模型、密钥或客户端提示词。后端只解析系统上传接口返回的 URL，不抓取任意 HTTP 地址，不能通过 URL 指定服务器文件路径或其他用户的文件。
+三个字段均必填；处理要求与分析要求各最多 10000 字符。仅接受上述字段，不接受二进制、Base64、用户 ID、模型、密钥或客户端提示词。后端只接受配置中 MinIO 的准确协议、域名/端口、桶和对象前缀，并检查对象路径中的用户 ID。不会抓取任意 HTTP 地址，不能通过 URL 指定服务器文件路径或其他用户的文件；旧相对资源标识继续兼容。
 
 ### 下载和删除
 
@@ -57,7 +60,9 @@
 
 ### 模型直接读取 URL
 
-后端将私有文件 URL 换成临时授权 URL：
+后端将私有文件 URL 换成临时授权 URL。MinIO 模式使用 S3v4 预签名 GET 地址，模型直接从 MinIO 下载原文，不经过业务后端或本地隧道。后端检查可达性时另签 HEAD 地址；GET 签名绑定请求方法，不能直接用于 HEAD。
+
+本地磁盘模式使用以下地址：
 
 ```text
 https://files.example.com/webui/file-analysis/model-files/{userId}/{id}/{expires}/{signature}/{filename}
@@ -65,11 +70,53 @@ https://files.example.com/webui/file-analysis/model-files/{userId}/{id}/{expires
 
 模型服务直接 GET 此 URL 下载原文件，无需业务 JWT。链接使用每文件独立随机密钥的 HMAC-SHA256 签名，限定用户、文件及有效期；默认 30 分钟，且不超过上传文件的有效期。过期、篡改或删除文件后拒绝访问。密钥保存在私有目录，后端重启不会使已有链接失效；支持 HEAD 探测。
 
-只发送 URL：PNG/JPEG/GIF/WEBP 使用 `image_url.url`；其他文件使用 `file.filename` 与 `file.file_data`（值为 URL）。提示词也提供链接，要求自行读取且禁止泄露。主模型与预留工具均不接收内嵌字节。后端只在上传保存、响应下载时读写原文件，不提取内容、OCR 或转换。
+只发送 URL：PNG/JPEG/GIF/WEBP 使用 `image_url.url`；其他文件使用 `file.filename` 与 `file.file_data`（值为 URL）。提示词也提供链接，要求自行读取且禁止泄露。主模型与预留工具均不接收内嵌字节。后端只在上传保存、响应下载和旧文件迁移时读写原文件，不提取内容、OCR 或转换。
+
+### MinIO 存储
+
+当前本地运行配置已切换到 MinIO，不需要启动文件隧道。运行时地址和凭据从环境变量注入，配置模板见 [backend.env.example](backend.env.example)：
+
+```yaml
+webui:
+  file-analysis:
+    storage-type: ${FILE_ANALYSIS_STORAGE_TYPE:local}
+    model-url-ttl-seconds: 1800
+    retention-seconds: 86400
+    minio:
+      endpoint: ${MINIO_ENDPOINT}
+      public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
+      access-key: ${MINIO_ACCESS_KEY}
+      secret-key: ${MINIO_SECRET_KEY}
+      bucket: ${MINIO_BUCKET:ai-file}
+      region: ${MINIO_REGION:us-east-1}
+      prefix: ${MINIO_PREFIX:file-analysis/}
+```
+
+`public-endpoint` 可省略，默认与 `endpoint` 相同；内网上传和公网下载地址不同的部署需要分别配置。外部模型必须能访问签名时使用的地址，不要在签名完成后替换域名、端口或路径。默认使用路径形式访问桶，兼容用户提供的 S3v4 接口。
+
+本机在 Git 忽略的 `.local/backend.env`（权限 `600`）中设置 `FILE_ANALYSIS_STORAGE_TYPE=minio`、`MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` 等变量。`./start-local.sh` 将其作为环境变量传给 Java，已导出的环境变量优先于该文件。修改后重启生效。IDEA 或服务器直接启动 JAR 时，需要在运行配置、容器或服务管理器中注入同名变量，不会自动读取这个本地文件。旧 JSON 配置仅保留兼容能力，当前运行配置不再使用它。
+
+原文件对象路径为 `file-analysis/<用户ID>/<随机UUID>`，原文件名、MIME 和有效期存放在对象元数据中；新上传不保留本地原文件或元数据副本。前端接收并提交完整 `fileUrl`，由后端根据登录身份验证对象归属及有效期后生成新签名 URL，避免上传后长时间等待导致链接过期。私有下载和删除仍使用业务接口 `/webui/file-analysis/files/{fileId}`，前端不会向 MinIO 发送业务登录 Token。
+
+切换前的本地文件仍可下载和删除；再次分析时会把原字节及原有效期迁移到 MinIO，确认远端对象有效后才移除本地副本，不需要临时隧道。迁移不进行文件解析或内容提取。
+
+过期文件访问时会被删除。成功上传还会至多每分钟尝试清理一次当前用户的过期对象，单次最多扫描 1000 项；大量文件或长期无访问时，应对专用前缀设置 MinIO 生命周期策略。删除指定本次上传的版本，避免开启版本控制时只留下删除标记而保留原文件版本。
+
+桶应保持私有。签名 URL 在有效期内无需业务 JWT 即可下载；若桶允许匿名读取，移除签名也可能直接访问文件。2026-10-22 实测当前 `ai-file` 桶允许匿名下载，接入没有修改原桶策略。生产环境还应配置模型可访问、证书有效的 HTTPS 文件入口；当前提供的地址为 HTTP。
+
+验证命令（仅 `--model` 会额外调用当前用户模型）：
+
+```bash
+node tests/run-minio-verification.mjs --live
+node tests/run-minio-verification.mjs --live --model
+node tests/verify-minio-upload.mjs --live
+```
+
+第一条验证真实 SDK 上传、签名 GET/HEAD、原字节、用户隔离和删除；第二条增加真实模型读取图片像素中的随机数字校验；第三条验证运行中后端的登录、上传、MinIO 对象存在、私有下载及远端删除。均只清理本次创建的测试文件/会话，不修改其他对象或用户模型配置。结果保存在 Git 忽略的 `.local/minio-live-result.json` 和 `.local/minio-runtime-result.json`。普通 Maven 测试默认跳过外部调用。
 
 供应商必须支持相应附件 URL 协议，公网可达不等于任意模型支持任意文件。协议参考 [DeepSeek 图片 URL](https://api-docs.deepseek.com/guides/vision/) 和 [OpenRouter PDF URL](https://openrouter.ai/docs/guides/overview/multimodal/pdfs)。不兼容供应商需另加协议适配。不支持文件时由模型决定是否调用预留工具，不回退为 Base64 或本地提取。
 
-### 本地隧道测试（ngrok / Cloudflare）
+### 本地磁盘模式的隧道测试（ngrok / Cloudflare）
 
 本机 localhost 地址不能供外部模型下载。先按 [ngrok 官方说明](https://ngrok.com/download/mac-os) 安装并在本机配置账号令牌，再执行：
 
@@ -106,7 +153,7 @@ ngrok 免费入口可能给浏览器式 User-Agent 返回 HTML 提示页，文�
 }
 ```
 
-初版仅返回分析文字。`previewFile` 保留给将来实际生成文件的扩展，目前始终为 null；不会生成或伪造文件下载地址。原始上传保存在私有目录，默认 `.local/ai-files/<用户ID>/<随机UUID>/`，不在公开上传目录中。元数据与原文件保留，重启后仍可在有效期内读取。读取过期文件时删除并返回 410；成功上传时至多每分钟清理一次其他过期文件，没有新上传时磁盘清理由后续读取/上传触发。
+初版仅返回分析文字。`previewFile` 保留给将来实际生成文件的扩展，目前始终为 null；不会生成或伪造文件下载地址。MinIO 模式保存远端对象及其元数据；本地磁盘模式默认保存在 `.local/ai-files/<用户ID>/<随机UUID>/`，不在公开上传目录中。重启后仍可在有效期内读取。读取过期文件时删除并返回 410。
 
 错误返回（认证及容器级上传错误可能沿用若依格式）：
 
@@ -131,8 +178,9 @@ ngrok 免费入口可能给浏览器式 User-Agent 返回 HTML 提示页，文�
 | 502 | MODEL_AUTH_FAILED / MODEL_REQUEST_FAILED / MODEL_REQUEST_REJECTED / MODEL_UNAVAILABLE | 模型请求失败，不清理业务登录 |
 | 502 | INVALID_MODEL_RESPONSE / EMPTY_ANALYSIS / ANALYSIS_INCOMPLETE | 模型响应错误、空内容或输出被截断 |
 | 502 | INVALID_TOOL_CALL / INVALID_TOOL_RESULT / TOOL_LIMIT_REACHED | 工具协议或执行轮数异常 |
+| 502 | FILE_STORAGE_UNAVAILABLE | MinIO 连接、认证、桶权限或读写失败 |
 | 503 | FILE_TOOL_NOT_CONFIGURED | 模型要求工具，但工具尚未接入 |
-| 503 | FILE_PUBLIC_URL_NOT_CONFIGURED | 请配置文件公网入口或启动隧道 |
+| 503 | FILE_PUBLIC_URL_NOT_CONFIGURED | 本地磁盘模式尚未配置文件公网入口 |
 | 503 | FILE_URL_UNREACHABLE | 文件入口不可达、返回错误内容或正在自动恢复；无需重新上传 |
 | 504 | ANALYSIS_TIMEOUT | 单次模型请求超时 |
 
@@ -177,3 +225,19 @@ Spring 全局上传限制仍需满足需求：`spring.servlet.multipart.max-file
 2026-10-22，使用 Cloudflare 临时隧道与当前用户配置的 DeepSeek Flash 完成图片 URL 分析：仅图片像素包含校验数字，模型请求只发送 URL，模型服务产生一次实际文件 GET，并正确读出数字。浏览器式及常见服务端 User-Agent 均下载原 PNG；错误签名拒绝，登录、管理、分析及私有文件路由返回 404。测试上传与独立登录会话已清理。此结果验证图片 URL 链路，其他文件格式仍取决于模型与供应商协议。
 
 当前环境采用 IPv4 + HTTP/2 连接 Cloudflare，以避免先前 IPv6 隧道连接失效；启动脚本会检查公网请求实际抵达网关后才登记域名。临时域名仅用于测试，不作为生产固定域名。
+
+## 查看文件分析处理日志
+
+脚本启动的本地日志目录为 `.local/logs/`，服务器可通过 `RUOYI_LOG_PATH` 指定目录。
+
+- `file-analysis.log`：文件上传、签名链接准备、HEAD 检查、模型请求及状态、附件拒绝后重试、工具调用、分析完成/失败等阶段日志，按天轮转，保留 30 天。
+- `backend-console.log`：完整启动及控制台日志。
+- `sys-info.log`、`sys-error.log`：系统信息和错误日志。
+
+```bash
+tail -f .local/logs/file-analysis.log
+tail -f .local/logs/backend-console.log
+rg -F '具体请求编号' .local/logs/file-analysis.log
+```
+
+上传与分析响应包含 `requestId`；同一次请求的各阶段使用相同编号。正常响应同时返回 `X-Request-Id` 头。日志只记录用户 ID、文件 ID、MIME/大小、模型名、HTTP 状态、错误码、耗时和结果长度，不记录密钥、业务 JWT、完整签名 URL、文件正文、完整提示词或模型分析正文。

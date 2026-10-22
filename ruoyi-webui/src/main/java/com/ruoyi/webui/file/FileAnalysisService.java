@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 /** Executes the user's model decisions. Does not inspect/extract file contents or choose a different model. */
 @Service
 public class FileAnalysisService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(FileAnalysisService.class);
     public static final String TOOL_NAME = "analyze_uploaded_file";
     private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
     private final AiAnalysisService ai;
@@ -40,6 +41,22 @@ public class FileAnalysisService {
 
     public FileAnalysisResult analyze(Long userId, String requestId, FileAnalysisReference file,
             String processing, String analysis) {
+        long start = System.nanoTime();
+        log.info("stage=analysis_started requestId={} userId={} mimeType={} size={}", requestId, userId, file.mimeType, file.size);
+        try {
+            FileAnalysisResult result = analyzeFile(userId, requestId, file, processing, analysis);
+            log.info("stage=analysis_completed requestId={} resultChars={} durationMs={}", requestId,
+                    result.analysisText.length(), (System.nanoTime() - start) / 1000000);
+            return result;
+        } catch (FileAnalysisException e) {
+            log.warn("stage=analysis_failed requestId={} httpStatus={} code={} durationMs={}", requestId,
+                    e.getStatus(), e.getCode(), (System.nanoTime() - start) / 1000000);
+            throw e;
+        }
+    }
+
+    private FileAnalysisResult analyzeFile(Long userId, String requestId, FileAnalysisReference file,
+            String processing, String analysis) {
         if (processing == null || processing.trim().isEmpty() || analysis == null || analysis.trim().isEmpty()) {
             throw failure(400, "INVALID_REQUEST", "文件处理要求和内容分析要求不能为空");
         }
@@ -48,7 +65,7 @@ public class FileAnalysisService {
         }
         FileAnalysisContext context = new FileAnalysisContext(userId, requestId, file.fileName, file.mimeType,
                 file.url, file.size, processing.trim(), analysis.trim());
-        checkFileUrl(context);
+        checkFileUrl(context, file.validationUrl);
         JSONObject body = prompts.buildFileCompletion(context, true, "");
         boolean urlAttachment = true;
         boolean canRetryAttachment = true;
@@ -58,9 +75,10 @@ public class FileAnalysisService {
             try {
                 message = completion(context.getUserId(), body);
             } catch (AttachmentRejected rejected) {
+                log.info("stage=model_attachment_rejected httpStatus={} retryAllowed={}", rejected.status, canRetryAttachment);
                 // A tunnel can fail between the initial HEAD and the provider fetching the file.
                 // Do not misreport an unreachable URL as a missing model capability or tool.
-                checkFileUrl(context);
+                checkFileUrl(context, file.validationUrl);
                 if (!canRetryAttachment) {
                     throw failure(502, "MODEL_REQUEST_REJECTED", "当前模型接口拒绝文件分析请求，请检查模型的工具调用支持或平台适配");
                 }
@@ -70,6 +88,7 @@ public class FileAnalysisService {
                 canRetryAttachment = false;
                 body = prompts.buildFileCompletion(context, false,
                         "上一携带文件 URL 附件的请求被模型接口拒绝（HTTP " + rejected.status + "）。本次只提供文件元信息，未提供文件内容。");
+                log.info("stage=model_retry_without_attachment");
                 continue;
             }
             canRetryAttachment = false;
@@ -94,11 +113,14 @@ public class FileAnalysisService {
             }
             String task = task(function.get("arguments"));
             FileAnalysisTool handler = tools.get(properties.getToolHandler());
+            log.info("stage=tool_requested tool={} round={}", TOOL_NAME, toolRounds);
             if (handler == null) { throw failure(503, "FILE_TOOL_NOT_CONFIGURED", "模型请求的文件分析工具尚未配置，请联系管理员"); }
+            long toolStart = System.nanoTime();
             String toolResult = handler.analyze(context, task);
             if (toolResult == null || toolResult.trim().isEmpty() || toolResult.length() > MAX_RESPONSE_BYTES) {
                 throw failure(502, "INVALID_TOOL_RESULT", "文件处理服务未返回有效结果");
             }
+            log.info("stage=tool_completed resultChars={} durationMs={}", toolResult.length(), (System.nanoTime() - toolStart) / 1000000);
             JSONObject assistant = new JSONObject();
             assistant.put("role", "assistant");
             assistant.put("content", message.get("content"));
@@ -117,16 +139,18 @@ public class FileAnalysisService {
     }
 
     /** Transport validation only: HEAD never reads or extracts the uploaded file body. */
-    private void checkFileUrl(FileAnalysisContext context) {
+    private void checkFileUrl(FileAnalysisContext context, String validationUrl) {
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) URI.create(context.getFileUrl()).toURL().openConnection();
+            connection = (HttpURLConnection) URI.create(validationUrl).toURL().openConnection();
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(5000);
             connection.setRequestMethod("HEAD");
             int status = connection.getResponseCode();
             String type = connection.getContentType();
+            log.info("stage=file_url_checked httpStatus={} expectedBytes={} actualBytes={} mimeMatches={}", status,
+                    context.getFileSize(), connection.getContentLengthLong(), type != null && context.getMimeType().equalsIgnoreCase(type.split(";", 2)[0].trim()));
             if (status != 200 || type == null
                     || !context.getMimeType().equalsIgnoreCase(type.split(";", 2)[0].trim())
                     || connection.getContentLengthLong() != context.getFileSize()) {
@@ -137,14 +161,19 @@ public class FileAnalysisService {
     }
 
     private FileAnalysisException unreachable() {
-        return failure(503, "FILE_URL_UNREACHABLE", "文件公网链接暂时不可访问，临时隧道可能已失效或正在恢复，请稍后重试；无需重新上传文件");
+        return failure(503, "FILE_URL_UNREACHABLE", "文件访问地址暂时不可达，请检查文件存储服务或网络，稍后重试；无需重新上传文件");
     }
 
     private JSONObject completion(Long userId, JSONObject body) {
         HttpURLConnection connection = null;
+        long start = System.nanoTime();
+        log.info("stage=model_request_started userId={}", userId);
         try {
             connection = ai.openFileCompletion(userId, body);
             int status = connection.getResponseCode();
+            String model = String.valueOf(body.get("model")).replaceAll("[\\r\\n\\t]", "_");
+            log.info("stage=model_response model={} httpStatus={} durationMs={}", model.substring(0, Math.min(100, model.length())),
+                    status, (System.nanoTime() - start) / 1000000);
             if (status == 400 || status == 415 || status == 422) { throw new AttachmentRejected(status); }
             if (status < 200 || status >= 300) {
                 if (status == 429) { throw failure(429, "MODEL_RATE_LIMITED", "模型请求过于频繁或额度不足，请稍后重试"); }

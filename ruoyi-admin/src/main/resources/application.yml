@@ -127,3 +127,16 @@ xss:
   excludes: /system/notice
   # 匹配链接
   urlPatterns: /system/*,/monitor/*,/tool/*
+
+# File storage: injected by the deployment environment.
+webui:
+  file-analysis:
+    storage-type: ${FILE_ANALYSIS_STORAGE_TYPE:local}
+    minio:
+      endpoint: ${MINIO_ENDPOINT:}
+      public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
+      access-key: ${MINIO_ACCESS_KEY:}
+      secret-key: ${MINIO_SECRET_KEY:}
+      bucket: ${MINIO_BUCKET:ai-file}
+      region: ${MINIO_REGION:us-east-1}
+      prefix: ${MINIO_PREFIX:file-analysis/}

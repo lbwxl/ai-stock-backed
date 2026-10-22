@@ -152,6 +152,16 @@ DeepSeek 服务地址应使用 `https://api.deepseek.com/v1`。原 HTTP 地址�
 
 ## 文件分析私有上传
 
+2026-10-22：当前本地配置已启用 MinIO，地址与凭据通过环境变量配置。本机默认值位于被 Git 忽略的 `.local/backend.env`（权限 `600`），由 `start-local.sh` 传给 Java，已导出的环境变量优先。变量包括 `FILE_ANALYSIS_STORAGE_TYPE=minio`、`MINIO_ENDPOINT`、`MINIO_PUBLIC_ENDPOINT`（可选）、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET`，模板见 [backend.env.example](backend.env.example)。修改后重启后端。IDEA 和服务器直接启动时需在运行环境注入这些变量。新文件存入 `ai-file` 桶的 `file-analysis/<用户ID>/<随机UUID>`，元数据也随对象保存，不依赖本地文件目录或 Cloudflare/ngrok 隧道。旧本地上传再次分析时迁移原文件并保留原有效期。
+
+可运行 `node tests/run-minio-verification.mjs --live --model` 验证真实 MinIO 与当前用户模型，运行 `node tests/verify-minio-upload.mjs --live` 验证运行中的后端接口。前者 `--model` 会调用真实模型 API。测试不会修改用户模型配置，结束后删除自己的测试对象和会话。生产部署需配置私有桶和 HTTPS 文件入口，详见 [FILE_ANALYSIS_API.md](FILE_ANALYSIS_API.md)。
+
+以下隧道说明仅适用于 `storage-type: local`：
+
 原始文件默认保存在当前项目 `.local/ai-files/`，按用户和随机 UUID 隔离，默认有效期 24 小时。此目录不挂在 `/profile` 等公开资源路径下。分析接口验证文件归属后生成临时签名 URL，模型服务直接下载原文件，模型请求不内嵌字节。生产配置 `webui.file-analysis.public-base-url`；本地可用 `./start-file-tunnel.sh` 启动仅暴露签名下载接口的 ngrok 隧道，也可使用 `./start-file-tunnel.sh cloudflare` 启动 Cloudflare 临时隧道，执行 `./stop-file-tunnel.sh` 停止。存储路径和保留时间可通过 `webui.file-analysis.storage-path`、`retention-seconds` 配置，详见 [FILE_ANALYSIS_API.md](FILE_ANALYSIS_API.md)。
 
 文件隧道由本项目守护进程维护：进程退出、临时域名撤销或公网健康检查失败时自动重建，并更新 `.local/file-tunnel-url`；状态见 `.local/file-tunnel-status.json`。分析前校验文件 URL，只做 HEAD 网络检查；不可达时返回明确的 503，恢复后可直接重试已有文件。
+
+## 文件分析日志
+
+运行 `tail -f .local/logs/file-analysis.log` 查看文件分析各阶段；完整控制台日志为 `.local/logs/backend-console.log`，系统错误为 `.local/logs/sys-error.log`。使用上传或分析响应中的 `requestId` 检索同一次请求。日志不包含密钥、JWT、完整签名 URL 或文件正文。当前上传响应返回完整的 MinIO 签名 `fileUrl`，另有 `fileId`、`urlExpiresAt` 和 `requestId`，不再返回 MinIO 文件的相对地址。

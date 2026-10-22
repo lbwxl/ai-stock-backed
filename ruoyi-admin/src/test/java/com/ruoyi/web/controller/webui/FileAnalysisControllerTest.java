@@ -200,6 +200,21 @@ public class FileAnalysisControllerTest {
         assertEquals(0, requests.size()); assertEquals(0, toolCalls);
     }
 
+    @Test public void signedHeadValidationUrlIsSeparateFromTheGetUrlSentToTheModel() {
+        provider.createContext("/signed-head", exchange -> {
+            assertEquals("HEAD", exchange.getRequestMethod());
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.getResponseHeaders().set("Content-Length", "123");
+            exchange.sendResponseHeaders(200, -1); exchange.close();
+        });
+        String base = "http://127.0.0.1:" + provider.getAddress().getPort();
+        FileAnalysisReference file = new FileAnalysisReference("image.png", "image/png", 123, base + "/signed-get", base + "/signed-head");
+        assertEquals("模型直接分析的结果", service.analyze(11L, "request", file, "处理", "分析").analysisText);
+        JSONObject image = requests.get(0).getJSONArray("messages").getJSONObject(1).getJSONArray("content").getJSONObject(1);
+        assertEquals(base + "/signed-get", image.getJSONObject("image_url").getString("url"));
+        assertFalse(requests.get(0).toJSONString().contains("signed-head"));
+    }
+
     @Test public void htmlWarningOrWrongLengthIsNotPassedOffAsAnUnsupportedImage() {
         fileType = "text/html";
         expectFailure(503, "FILE_URL_UNREACHABLE");
@@ -432,5 +447,33 @@ public class FileAnalysisControllerTest {
         assertEquals(415, mvc.perform(multipart("/webui/file-analysis").file(file("data.txt", "text/plain")))
                 .andReturn().getResponse().getStatus());
         assertEquals(0, requests.size());
+    }
+
+    @Test public void processingStagesShareRequestIdWithoutLoggingCredentialsUrlsOrContent() throws Exception {
+        ch.qos.logback.classic.Logger serviceLogger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(FileAnalysisService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>() {
+            @Override protected void append(ch.qos.logback.classic.spi.ILoggingEvent event) { event.prepareForDeferredProcessing(); super.append(event); }
+        };
+        appender.start(); serviceLogger.addAppender(appender);
+        try {
+            MockMvc mvc = mvc(); String url = uploadedUrl(mvc);
+            org.springframework.mock.web.MockHttpServletResponse response = mvc.perform(post("/webui/file-analysis")
+                    .contentType("application/json").content(analysisBody(url))).andReturn().getResponse();
+            JSONObject body = JSONObject.parseObject(response.getContentAsString(StandardCharsets.UTF_8));
+            String requestId = body.getString("requestId");
+            assertEquals(requestId, response.getHeader("X-Request-Id"));
+            StringBuilder logged = new StringBuilder();
+            for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+                assertEquals(requestId, event.getMDCPropertyMap().get("fileAnalysisRequestId"));
+                logged.append(event.getFormattedMessage());
+            }
+            assertTrue(logged.toString().contains("stage=file_url_checked"));
+            assertTrue(logged.toString().contains("stage=model_response"));
+            assertTrue(logged.toString().contains("stage=analysis_completed"));
+            assertFalse(logged.toString().contains("private-key-22"));
+            assertFalse(logged.toString().contains("秘密原文"));
+            assertFalse(logged.toString().contains("http://"));
+            assertNull(org.slf4j.MDC.get("fileAnalysisRequestId"));
+        } finally { serviceLogger.detachAppender(appender); appender.stop(); }
     }
 }

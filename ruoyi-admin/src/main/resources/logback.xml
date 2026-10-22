@@ -3,7 +3,7 @@
     <!-- 日志存放路径 -->
 	<property name="log.path" value="${RUOYI_LOG_PATH:-./.local/logs}" />
     <!-- 日志输出格式 -->
-	<property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{20} - [%method,%line] - %msg%n" />
+	<property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{20} - [%method,%line] [requestId=%X{fileAnalysisRequestId:-}] - %msg%n" />
 
 	<!-- 控制台输出 -->
 	<appender name="console" class="ch.qos.logback.core.ConsoleAppender">
@@ -71,6 +71,24 @@
         </encoder>
     </appender>
 	
+    <!-- File-analysis stages, including warnings, without payloads or signed URLs. -->
+    <appender name="file_analysis" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${log.path}/file-analysis.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${log.path}/file-analysis.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder><pattern>${log.pattern}</pattern></encoder>
+    </appender>
+    <logger name="com.ruoyi.webui.file" level="info">
+        <appender-ref ref="file_analysis" />
+    </logger>
+    <logger name="com.ruoyi.web.controller.webui.FileAnalysisController" level="info">
+        <appender-ref ref="file_analysis" />
+    </logger>
+    <!-- Avoid debug SQL parameter dumps containing provider keys. -->
+    <logger name="com.ruoyi.webui.mapper" level="info" />
+
 	<!-- 系统模块日志级别控制  -->
 	<logger name="com.ruoyi" level="info" />
 	<!-- Spring日志级别控制  -->

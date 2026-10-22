@@ -29,13 +29,22 @@ public class FileAnalysisStorage {
     private static final String ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
     private final FileAnalysisProperties properties;
     private final Clock clock;
+    private final MinioFileAnalysisStorage minio;
     private final AtomicLong lastCleanup = new AtomicLong();
 
     @Autowired
     public FileAnalysisStorage(FileAnalysisProperties properties) { this(properties, Clock.systemUTC()); }
-    public FileAnalysisStorage(FileAnalysisProperties properties, Clock clock) { this.properties = properties; this.clock = clock; }
+    public FileAnalysisStorage(FileAnalysisProperties properties, Clock clock) {
+        this.properties = properties; this.clock = clock;
+        if (!java.util.Arrays.asList("local", "minio").contains(properties.getStorageType())) {
+            throw new FileAnalysisException(500, "INVALID_STORAGE_CONFIG", "不支持的文件存储类型");
+        }
+        this.minio = "minio".equals(properties.getStorageType()) ? new MinioFileAnalysisStorage(properties, clock) : null;
+        org.slf4j.LoggerFactory.getLogger(FileAnalysisStorage.class).info("File analysis storage backend: {}", properties.getStorageType());
+    }
 
     public JSONObject upload(Long userId, MultipartFile file) {
+        if (minio != null) return minio.upload(userId, file);
         FileAnalysisUpload upload = FileAnalysisUpload.read(file, properties.getMaxFileSize());
         String id = UUID.randomUUID().toString();
         Path directory = directory(userId, id);
@@ -62,7 +71,7 @@ public class FileAnalysisStorage {
     }
 
     private JSONObject describe(Long userId, String fileUrl) {
-        Path directory = directory(userId, idFromUrl(fileUrl));
+        Path directory = directory(userId, idFromUrl(userId, fileUrl));
         try {
             Path meta = directory.resolve("metadata.json");
             Path data = directory.resolve("data");
@@ -81,17 +90,20 @@ public class FileAnalysisStorage {
     }
 
     public FileAnalysisUpload load(Long userId, String fileUrl) {
+        if (remote(userId, fileUrl)) return minio.load(userId, idFromUrl(userId, fileUrl));
         JSONObject metadata = describe(userId, fileUrl);
         try {
             return new FileAnalysisUpload(metadata.getString("fileName"), metadata.getString("mimeType"),
-                    Files.readAllBytes(directory(userId, idFromUrl(fileUrl)).resolve("data")));
+                    Files.readAllBytes(directory(userId, idFromUrl(userId, fileUrl)).resolve("data")));
         } catch (IOException e) { throw missing(); }
     }
 
     /** Analysis reads metadata only. The provider fetches original bytes from this scoped URL. */
     public FileAnalysisReference modelReference(Long userId, String fileUrl) {
+        if (remote(userId, fileUrl)) return minio.modelReference(userId, idFromUrl(userId, fileUrl));
+        if (minio != null) return migrateLocal(userId, fileUrl);
         JSONObject metadata = describe(userId, fileUrl);
-        String id = idFromUrl(fileUrl);
+        String id = idFromUrl(userId, fileUrl);
         long expires = Math.min(metadata.getLongValue("expiresAt") / 1000,
                 clock.millis() / 1000 + Math.max(60, Math.min(3600, properties.getModelUrlTtlSeconds())));
         String base = publicBaseUrl();
@@ -163,9 +175,28 @@ public class FileAnalysisStorage {
 
     private FileAnalysisException denied() { return new FileAnalysisException(403, "INVALID_FILE_SIGNATURE", "文件访问链接无效"); }
 
-    public void delete(Long userId, String fileUrl) { removeDirectory(directory(userId, idFromUrl(fileUrl))); }
+    public void delete(Long userId, String fileUrl) {
+        if (minio != null) minio.delete(userId, idFromUrl(userId, fileUrl));
+        removeDirectory(directory(userId, idFromUrl(userId, fileUrl)));
+    }
 
-    private String idFromUrl(String url) {
+    private synchronized FileAnalysisReference migrateLocal(Long userId, String fileUrl) {
+        if (remote(userId, fileUrl)) return minio.modelReference(userId, idFromUrl(userId, fileUrl));
+        JSONObject metadata = describe(userId, fileUrl);
+        FileAnalysisReference reference = minio.importLocal(userId, idFromUrl(userId, fileUrl), load(userId, fileUrl), metadata.getLongValue("expiresAt"));
+        // Copy only original bytes and metadata. Remove the local copy after remote verification.
+        removeDirectory(directory(userId, idFromUrl(userId, fileUrl)));
+        return reference;
+    }
+
+    private boolean remote(Long userId, String fileUrl) {
+        Path local = directory(userId, idFromUrl(userId, fileUrl));
+        // Preserve owner-scoped access to files uploaded before switching the storage backend.
+        return minio != null && !Files.isRegularFile(local.resolve("metadata.json"), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private String idFromUrl(Long userId, String url) {
+        if (minio != null && url != null && !url.startsWith(URL_PREFIX)) return minio.idFromUrl(userId, url);
         if (url == null || !url.matches(java.util.regex.Pattern.quote(URL_PREFIX) + ID)) {
             throw new FileAnalysisException(400, "INVALID_FILE_URL", "请使用当前系统上传接口返回的文件 URL");
         }

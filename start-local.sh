@@ -58,21 +58,39 @@ fi
 java_bin="${JAVA_HOME:+$JAVA_HOME/bin/}java"
 maven_bin="${RUOYI_MAVEN:-$HOME/.local/share/aigupiao-tools/apache-maven-3.9.9/bin/mvn}"
 [[ -x "$maven_bin" ]] || fail "Maven missing; set RUOYI_MAVEN."
-"$maven_bin" -B -ntp -s local-maven-settings.xml -pl ruoyi-admin -am -DskipTests package
+"$maven_bin" -B -ntp -s local-maven-settings.xml -pl ruoyi-admin -am -DskipTests -Dmaven.jar.forceCreation=true package
 export RUOYI_LOG_PATH="$local_dir/logs"
 command -v python3 >/dev/null || fail "Python 3 is required to detach the backend from the launching terminal."
 backend_pid="$(python3 - "$java_bin" "$project_dir" "$local_dir" <<'PY'
 import os
+import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 java, project, local = sys.argv[1:]
+# Local dotenv defaults become real environment variables; already exported values take priority.
+backend_env = os.environ.copy()
+env_path = Path(local) / 'backend.env'
+if env_path.is_file():
+    for line_number, raw in enumerate(env_path.read_text().splitlines(), 1):
+        parts = shlex.split(raw, comments=True)
+        if not parts:
+            continue
+        if parts[0] == 'export':
+            parts = parts[1:]
+        if len(parts) != 1 or '=' not in parts[0]:
+            raise SystemExit('Invalid backend.env assignment on line ' + str(line_number))
+        name, value = parts[0].split('=', 1)
+        if not re.fullmatch(r'[A-Z][A-Z0-9_]*', name):
+            raise SystemExit('Invalid backend.env variable on line ' + str(line_number))
+        backend_env.setdefault(name, value)
 with (Path(local) / 'logs/backend-console.log').open('ab') as log:
     process = subprocess.Popen([
         java, '-Djava.awt.headless=true', '-jar', project + '/ruoyi-admin/target/ruoyi-admin.jar',
         '--spring.profiles.active=druid,local', '--spring.config.additional-location=file:' + local + '/',
-    ], cwd=project, env=os.environ, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    ], cwd=project, env=backend_env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 print(process.pid)
 PY
 )"
