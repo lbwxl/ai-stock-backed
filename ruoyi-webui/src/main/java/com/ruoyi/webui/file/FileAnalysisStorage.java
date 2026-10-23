@@ -31,6 +31,7 @@ public class FileAnalysisStorage {
     private final Clock clock;
     private final MinioFileAnalysisStorage minio;
     private final AtomicLong lastCleanup = new AtomicLong();
+    public static final long RECORD_RETENTION = 253402300799000L;
 
     @Autowired
     public FileAnalysisStorage(FileAnalysisProperties properties) { this(properties, Clock.systemUTC()); }
@@ -177,13 +178,36 @@ public class FileAnalysisStorage {
 
     public void delete(Long userId, String fileUrl) {
         if (minio != null) minio.delete(userId, idFromUrl(userId, fileUrl));
+        Path metadata = directory(userId, idFromUrl(userId, fileUrl)).resolve("metadata.json");
+        try {
+            if (Files.isRegularFile(metadata) && JSONObject.parseObject(new String(Files.readAllBytes(metadata), StandardCharsets.UTF_8)).getBooleanValue("recordOwned")) {
+                throw new FileAnalysisException(409, "FILE_IN_USE", "文件已关联分析记录，不能作为临时文件删除");
+            }
+        } catch (IOException e) { throw new FileAnalysisException(500, "FILE_STORAGE_UNAVAILABLE", "文件状态读取失败"); }
         removeDirectory(directory(userId, idFromUrl(userId, fileUrl)));
+    }
+
+    public String fileId(Long userId, String fileUrl) { directory(userId, idFromUrl(userId, fileUrl)); return idFromUrl(userId, fileUrl); }
+
+    public synchronized FileAnalysisReference retainForRecord(Long userId, String fileUrl) {
+        String id = fileId(userId, fileUrl);
+        if (minio != null) {
+            if (!remote(userId, fileUrl)) migrateLocal(userId, fileUrl);
+            minio.retainForRecord(userId, id);
+        } else {
+            JSONObject metadata = describe(userId, fileUrl);
+            metadata.put("expiresAt", RECORD_RETENTION); metadata.put("recordOwned", true);
+            try { Files.write(directory(userId, id).resolve("metadata.json"), metadata.toJSONString().getBytes(StandardCharsets.UTF_8)); }
+            catch (IOException e) { throw new FileAnalysisException(500, "FILE_STORAGE_UNAVAILABLE", "文件保留状态保存失败"); }
+        }
+        return modelReference(userId, URL_PREFIX + id);
     }
 
     private synchronized FileAnalysisReference migrateLocal(Long userId, String fileUrl) {
         if (remote(userId, fileUrl)) return minio.modelReference(userId, idFromUrl(userId, fileUrl));
         JSONObject metadata = describe(userId, fileUrl);
         FileAnalysisReference reference = minio.importLocal(userId, idFromUrl(userId, fileUrl), load(userId, fileUrl), metadata.getLongValue("expiresAt"));
+        if (metadata.getBooleanValue("recordOwned")) minio.retainForRecord(userId, idFromUrl(userId, fileUrl));
         // Copy only original bytes and metadata. Remove the local copy after remote verification.
         removeDirectory(directory(userId, idFromUrl(userId, fileUrl)));
         return reference;
@@ -197,6 +221,18 @@ public class FileAnalysisStorage {
 
     private String idFromUrl(Long userId, String url) {
         if (minio != null && url != null && !url.startsWith(URL_PREFIX)) return minio.idFromUrl(userId, url);
+        if (minio == null && url != null && !url.startsWith(URL_PREFIX)) {
+            try {
+                URI input = URI.create(url), base = URI.create(publicBaseUrl());
+                String prefix = base.getRawPath() + MODEL_URL_PREFIX + userId + "/";
+                if (base.getScheme().equals(input.getScheme()) && base.getRawAuthority().equals(input.getRawAuthority())
+                        && input.getQuery() == null && input.getFragment() == null
+                        && input.getRawPath().matches(java.util.regex.Pattern.quote(prefix) + ID + "/[0-9]+/[A-Za-z0-9_-]{43}/[^/]+")) {
+                    // Resolve an owned identifier only; never download a supplied URL or trust its old signature.
+                    return input.getRawPath().substring(prefix.length(), prefix.length() + 36);
+                }
+            } catch (IllegalArgumentException ignored) { }
+        }
         if (url == null || !url.matches(java.util.regex.Pattern.quote(URL_PREFIX) + ID)) {
             throw new FileAnalysisException(400, "INVALID_FILE_URL", "请使用当前系统上传接口返回的文件 URL");
         }

@@ -39,6 +39,11 @@ public class AiAnalysisService {
         return openModelRequest(userId, body);
     }
 
+    public String currentModelName(Long userId) {
+        SysLoginVo config = userConfigService.selectUserConfigByUserId(userId);
+        return config == null || config.getAiService() == null ? null : config.getAiService().getModelName();
+    }
+
     private HttpURLConnection openModelRequest(Long userId, JSONObject body) throws IOException {
         SysLoginVo config = userConfigService.selectUserConfigByUserId(userId);
         AiServiceVo ai = config == null ? null : config.getAiService();

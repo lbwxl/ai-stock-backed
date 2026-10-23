@@ -160,8 +160,28 @@ final class MinioFileAnalysisStorage {
     }
 
     void delete(Long userId, String id) {
-        try { remove(userId, id, stat(userId, id)); }
+        try {
+            StatObjectResponse file = stat(userId, id);
+            if ("true".equals(file.userMetadata().get("record-owned"))) throw new FileAnalysisException(409, "FILE_IN_USE", "文件已关联分析记录，不能作为临时文件删除");
+            remove(userId, id, file);
+        }
         catch (FileAnalysisException e) { if (e.getStatus() != 404) throw e; }
+    }
+
+    void retainForRecord(Long userId, String id) {
+        StatObjectResponse file = describe(userId, id);
+        if ("true".equals(file.userMetadata().get("record-owned"))) return;
+        Map<String, String> metadata = new HashMap<>(file.userMetadata());
+        metadata.put("record-owned", "true"); metadata.put("expires-at", Long.toString(FileAnalysisStorage.RECORD_RETENTION));
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", mime(file)); headers.put("Cache-Control", "private, no-store");
+        try {
+            client.copyObject(CopyObjectArgs.builder().bucket(bucket).object(key(userId, id))
+                    .source(CopySource.builder().bucket(bucket).object(key(userId, id)).versionId(file.versionId()).build())
+                    .metadataDirective(Directive.REPLACE).headers(headers).userMetadata(metadata).build());
+            if (file.versionId() != null) client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key(userId, id)).versionId(file.versionId()).build());
+            log.info("stage=file_retained_for_record userId={} fileId={}", userId, id);
+        } catch (Exception e) { throw unavailable(); }
     }
 
     private StatObjectResponse stat(Long userId, String id) {

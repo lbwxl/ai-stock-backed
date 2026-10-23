@@ -41,10 +41,22 @@ public class FileAnalysisService {
 
     public FileAnalysisResult analyze(Long userId, String requestId, FileAnalysisReference file,
             String processing, String analysis) {
+        return analyzeTracked(userId, requestId, file, processing, analysis, false);
+    }
+
+    public FileAnalysisResult analyzeForTask(Long userId, String requestId, FileAnalysisReference file,
+            String processing, String analysis) {
+        return analyzeTracked(userId, requestId, file, processing, analysis, true);
+    }
+
+    public String currentModelName(Long userId) { return ai.currentModelName(userId); }
+
+    private FileAnalysisResult analyzeTracked(Long userId, String requestId, FileAnalysisReference file,
+            String processing, String analysis, boolean manualOnTool) {
         long start = System.nanoTime();
         log.info("stage=analysis_started requestId={} userId={} mimeType={} size={}", requestId, userId, file.mimeType, file.size);
         try {
-            FileAnalysisResult result = analyzeFile(userId, requestId, file, processing, analysis);
+            FileAnalysisResult result = analyzeFile(userId, requestId, file, processing, analysis, manualOnTool);
             log.info("stage=analysis_completed requestId={} resultChars={} durationMs={}", requestId,
                     result.analysisText.length(), (System.nanoTime() - start) / 1000000);
             return result;
@@ -56,7 +68,7 @@ public class FileAnalysisService {
     }
 
     private FileAnalysisResult analyzeFile(Long userId, String requestId, FileAnalysisReference file,
-            String processing, String analysis) {
+            String processing, String analysis, boolean manualOnTool) {
         if (processing == null || processing.trim().isEmpty() || analysis == null || analysis.trim().isEmpty()) {
             throw failure(400, "INVALID_REQUEST", "文件处理要求和内容分析要求不能为空");
         }
@@ -112,6 +124,9 @@ public class FileAnalysisService {
                 throw failure(502, "INVALID_TOOL_CALL", "模型返回了不支持的文件工具调用");
             }
             String task = task(function.get("arguments"));
+            if (manualOnTool) {
+                throw failure(503, "FILE_MANUAL_REVIEW_REQUIRED", "当前文件需要后台人工维护分析结果");
+            }
             FileAnalysisTool handler = tools.get(properties.getToolHandler());
             log.info("stage=tool_requested tool={} round={}", TOOL_NAME, toolRounds);
             if (handler == null) { throw failure(503, "FILE_TOOL_NOT_CONFIGURED", "模型请求的文件分析工具尚未配置，请联系管理员"); }

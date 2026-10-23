@@ -86,6 +86,12 @@
     <logger name="com.ruoyi.web.controller.webui.FileAnalysisController" level="info">
         <appender-ref ref="file_analysis" />
     </logger>
+    <logger name="com.ruoyi.webui.task" level="info">
+        <appender-ref ref="file_analysis" />
+    </logger>
+    <logger name="com.ruoyi.web.controller.webui.FileAnalysisTaskController" level="info">
+        <appender-ref ref="file_analysis" />
+    </logger>
     <!-- Avoid debug SQL parameter dumps containing provider keys. -->
     <logger name="com.ruoyi.webui.mapper" level="info" />
 

@@ -256,6 +256,34 @@ public class FileAnalysisControllerTest {
         assertEquals("第三方处理结果", messages.getJSONObject(3).getString("content"));
     }
 
+    @Test public void persistedTaskWorkflowRequestsManualMaintenanceWithoutExecutingExternalTool() {
+        String url = storage.upload(11L, file("data.pdf", "application/pdf")).getString("fileUrl");
+        replies.add(tool());
+        try { service.analyzeForTask(11L, "task-fixture", storage.modelReference(11L, url), "处理要求", "分析要求"); fail(); }
+        catch (FileAnalysisException e) { assertEquals("FILE_MANUAL_REVIEW_REQUIRED", e.getCode()); }
+        assertEquals(0, toolCalls);
+    }
+
+    @Test public void filesAttachedToRecordsOutliveTemporaryRetentionAndCannotBeRemovedAsTemporaryUploads() {
+        Clock now = Clock.systemUTC();
+        FileAnalysisStorage initial = new FileAnalysisStorage(properties, now);
+        String url = initial.upload(11L, file("data.txt", "text/plain")).getString("fileUrl");
+        initial.retainForRecord(11L, url);
+        FileAnalysisStorage later = new FileAnalysisStorage(properties, Clock.offset(now, java.time.Duration.ofDays(2)));
+        assertArrayEquals(ORIGINAL, later.load(11L, url).getBytes());
+        try { later.delete(11L, url); fail(); } catch (FileAnalysisException e) { assertEquals("FILE_IN_USE", e.getCode()); }
+    }
+
+    @Test public void fullLocalSignedUrlsCanBeMaintainedOnlyByTheirOwnerAndConfiguredHost() {
+        String identifier = storage.upload(11L, file("data.txt", "text/plain")).getString("fileUrl");
+        String fullUrl = storage.modelReference(11L, identifier).url;
+        assertEquals(identifier.substring(FileAnalysisStorage.URL_PREFIX.length()), storage.fileId(11L, fullUrl));
+        storage.retainForRecord(11L, fullUrl);
+        assertArrayEquals(ORIGINAL, storage.load(11L, fullUrl).getBytes());
+        try { storage.fileId(22L, fullUrl); fail(); } catch (FileAnalysisException e) { assertEquals("INVALID_FILE_URL", e.getCode()); }
+        try { storage.fileId(11L, fullUrl.replace("127.0.0.1", "attacker.example")); fail(); } catch (FileAnalysisException e) { assertEquals("INVALID_FILE_URL", e.getCode()); }
+    }
+
     @Test public void attachmentRejectionIsSentToSameModelBeforeAnyToolRuns() {
         statuses.add(400); statuses.add(200); statuses.add(200);
         replies.add("{}"); replies.add(tool()); replies.add(answer("外部服务完成后的结论"));
