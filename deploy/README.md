@@ -1,25 +1,36 @@
-# JAR 部署环境变量
+# 后端启动脚本
 
-完整模板见 `backend.env.example`。复制到服务器 `/opt/ai-stock/config/backend.env` 并填写实际值。该模板中的标准 Spring 环境变量可直接覆盖 JAR 内配置，不需要额外的 `application-prod.yml`，也不需要重新打包 JAR。前面示例中的 `DB_PASSWORD`、`REDIS_PASSWORD`、`JWT_SECRET` 是自定义简写，只有在配套 YAML 引用了这些变量时才生效；本模板统一使用完整属性名。
-
-数据库 URL、账号和密码、Redis 连接信息、JWT 密钥、MinIO 地址和凭据必须与服务器实际环境一致。AI 供应商和模型 API Key 由后台的用户配置维护，不需要在本环境文件中额外设置。
-
-`MINIO_PUBLIC_ENDPOINT` 可省略，默认使用 `MINIO_ENDPOINT`；最终下载地址必须能被模型服务和用户浏览器访问。MinIO 地址填写对象接口端口（当前为 9000），不是控制台端口 9001。
-
-以下命令假设已创建部署目录并上传 `ruoyi-admin.jar`，由有目录写权限的运行用户执行：
+将 `setup-env.sh` 与 `ruoyi-admin.jar` 放在同一目录，直接编辑脚本顶部的配置区，填写 MySQL、Redis、JWT 和 MinIO 等配置。脚本不再交互提问，也不生成或读取 `config/backend.env`。
 
 ```bash
 cd /opt/ai-stock
-chmod 600 config/backend.env
-
-set -a
-. ./config/backend.env
-set +a
-
-mkdir -p "$RUOYI_LOG_PATH" "$RUOYI_PROFILE"
-nohup java -jar ruoyi-admin.jar > "$RUOYI_LOG_PATH/backend-console.log" 2>&1 &
+chmod 700 setup-env.sh
+vim setup-env.sh
+bash setup-env.sh check
+bash setup-env.sh
 ```
 
-JAR 不会自动加载 env 文件；上述 shell 命令负责加载。如果使用 systemd，配置 `EnvironmentFile=/opt/ai-stock/config/backend.env` 和 `WorkingDirectory=/opt/ai-stock`，再启动 Java。修改变量后需要重新启动后端；通过 shell 启动时应重新加载 env 文件。
+配置区每行 `default_env` 的第二个参数就是默认值。外部注入的同名环境变量优先，显式注入的空值也会保留。密码、密钥使用 Bash 单引号字符串；含单引号时按 Bash 语法转义。填写真实密钥的脚本属于私有配置，不应提交到代码仓库。
 
-本模板仅配置后端。用户前台 Nuxt 单独配置 `NUXT_PUBLIC_API_BASE_URL`；后台管理端生产请求前缀默认为 `/prod-api`，由 Nginx 转发至后端。
+必须填写数据库地址、账号和密码，JWT 固定密钥，以及 MinIO 的地址、Access Key、Secret Key 和存储桶。Redis 无密码时保留空字符串；`MINIO_PUBLIC_ENDPOINT` 留空时使用 `MINIO_ENDPOINT`。MinIO 填写对象接口地址（当前端口 9000），其最终下载地址需要模型服务和浏览器均能访问。AI 模型及供应商 API Key 由后台用户配置维护。
+
+脚本默认在前台运行，`run` 参数可省略。普通服务器上需要后台运行时：
+
+```bash
+nohup bash setup-env.sh > backend-console.log 2>&1 &
+tail -f backend-console.log
+```
+
+应用日志写入 `RUOYI_LOG_PATH`，默认是脚本同目录的 `logs/`；常规上传目录默认为同目录的 `uploads/`。修改脚本或容器环境变量后重启服务即可生效，无需重新打包 JAR。重启前需先停止已有后端进程。
+
+## 自行构建 Docker 镜像
+
+镜像需要 Java 和 Bash，将脚本及 JAR 放到同一目录。入口可使用：
+
+```dockerfile
+ENTRYPOINT ["/bin/bash", "/app/setup-env.sh"]
+```
+
+通过 Docker 的 `-e`、Compose 的 `environment` 等方式注入变量会覆盖脚本默认值。MySQL、Redis 地址应填写容器实际可达的地址，例如对应服务名；监听地址默认 `0.0.0.0`，端口默认 `18080`，按需映射端口，并为上传和日志目录挂载持久化存储。Java 以前台进程运行，标准输出可通过 `docker logs` 查看。
+
+脚本不安装数据库、不导入业务表；这些依赖由部署环境准备。现有 `backend.env.example` 可作为环境变量清单参考，脚本不会自动读取它。前台 Nuxt 的 `NUXT_PUBLIC_API_BASE_URL` 和后台管理端的请求转发需要分别配置。
