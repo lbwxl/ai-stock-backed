@@ -46,3 +46,8 @@ nbdist/
 !*/build/*.java
 !*/build/*.html
 !*/build/*.xml
+# 部署脚本生成的真实环境变量
+/deploy/config/backend.env
+/deploy/config/backend.env.tmp.*
+/deploy/docker/backend.docker.env
+/deploy/docker/ruoyi-admin.jar
