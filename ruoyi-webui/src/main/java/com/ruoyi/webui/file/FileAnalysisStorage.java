@@ -195,6 +195,8 @@ public class FileAnalysisStorage {
             if (!remote(userId, fileUrl)) migrateLocal(userId, fileUrl);
             minio.retainForRecord(userId, id);
         } else {
+            // A failed task creation must not pin a temporary upload indefinitely.
+            publicBaseUrl();
             JSONObject metadata = describe(userId, fileUrl);
             metadata.put("expiresAt", RECORD_RETENTION); metadata.put("recordOwned", true);
             try { Files.write(directory(userId, id).resolve("metadata.json"), metadata.toJSONString().getBytes(StandardCharsets.UTF_8)); }

@@ -1,0 +1,5 @@
+# Share local MinIO defaults between the startup script and IDEA's local profile.
+# Process environment variables still take priority. Never commit backend.env.
+spring:
+  config:
+    import: "optional:file:${RUOYI_LOCAL_ENV_FILE:./.local/backend.env}[.properties]"

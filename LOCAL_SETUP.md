@@ -178,7 +178,7 @@ DeepSeek 服务地址应使用 `https://api.deepseek.com/v1`。原 HTTP 地址�
 
 ## 文件分析私有上传
 
-2026-10-22：当前本地配置已启用 MinIO，地址与凭据通过环境变量配置。本机默认值位于被 Git 忽略的 `.local/backend.env`（权限 `600`），由 `start-local.sh` 传给 Java，已导出的环境变量优先。变量包括 `FILE_ANALYSIS_STORAGE_TYPE=minio`、`MINIO_ENDPOINT`、`MINIO_PUBLIC_ENDPOINT`（可选）、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET`，模板见 [backend.env.example](backend.env.example)。修改后重启后端。IDEA 和服务器直接启动时需在运行环境注入这些变量。新文件存入 `ai-file` 桶的 `file-analysis/<用户ID>/<随机UUID>`，元数据也随对象保存，不依赖本地文件目录或 Cloudflare/ngrok 隧道。旧本地上传再次分析时迁移原文件并保留原有效期。
+2026-10-22：当前本地配置已启用 MinIO，地址与凭据通过环境变量配置。本机默认值位于被 Git 忽略的 `.local/backend.env`（权限 `600`），脚本启动时由 `start-local.sh` 传给 Java；IDEA 的 `local` profile 也会通过 Spring Boot 配置导入自动加载同一文件，已导出的进程环境变量优先。该文件使用不带引号、无 `export` 的 `KEY=value` 格式；需要特殊转义的值请直接注入进程环境变量。变量包括 `FILE_ANALYSIS_STORAGE_TYPE=minio`、`MINIO_ENDPOINT`、`MINIO_PUBLIC_ENDPOINT`（可选）、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET`，模板见 [backend.env.example](backend.env.example)。修改后重启后端。IDEA 使用仓库中的 **RuoYi-local** 配置即可；服务器未启用 `local` profile 时仍需注入这些变量。新文件存入 `ai-file` 桶的 `file-analysis/<用户ID>/<随机UUID>`，元数据也随对象保存，不依赖本地文件目录或 Cloudflare/ngrok 隧道。旧本地上传再次分析时迁移原文件并保留原有效期。
 
 可运行 `node tests/run-minio-verification.mjs --live --model` 验证真实 MinIO 与当前用户模型，运行 `node tests/verify-minio-upload.mjs --live` 验证运行中的后端接口。前者 `--model` 会调用真实模型 API。测试不会修改用户模型配置，结束后删除自己的测试对象和会话。生产部署需配置私有桶和 HTTPS 文件入口，详见 [FILE_ANALYSIS_API.md](FILE_ANALYSIS_API.md)。
 

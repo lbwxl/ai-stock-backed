@@ -274,6 +274,18 @@ public class FileAnalysisControllerTest {
         try { later.delete(11L, url); fail(); } catch (FileAnalysisException e) { assertEquals("FILE_IN_USE", e.getCode()); }
     }
 
+    @Test public void missingPublicUrlDoesNotPinAFileWhenTaskCreationFails() {
+        String url = storage.upload(11L, file("retry.txt", "text/plain")).getString("fileUrl");
+        properties.setPublicBaseUrl("");
+        properties.setPublicBaseUrlFile(null);
+        try { storage.retainForRecord(11L, url); fail(); }
+        catch (FileAnalysisException e) { assertEquals("FILE_PUBLIC_URL_NOT_CONFIGURED", e.getCode()); }
+        // No record exists: closing the upload dialog must still be able to delete it.
+        storage.delete(11L, url);
+        try { storage.load(11L, url); fail(); }
+        catch (FileAnalysisException e) { assertEquals("FILE_NOT_FOUND", e.getCode()); }
+    }
+
     @Test public void fullLocalSignedUrlsCanBeMaintainedOnlyByTheirOwnerAndConfiguredHost() {
         String identifier = storage.upload(11L, file("data.txt", "text/plain")).getString("fileUrl");
         String fullUrl = storage.modelReference(11L, identifier).url;
