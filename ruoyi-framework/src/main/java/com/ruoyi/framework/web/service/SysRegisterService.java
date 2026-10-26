@@ -12,6 +12,7 @@ import com.ruoyi.common.exception.user.CaptchaException;
 import com.ruoyi.common.exception.user.CaptchaExpireException;
 import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.MessageUtils;
+import com.ruoyi.common.utils.PasswordPolicy;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.framework.manager.AsyncManager;
@@ -65,10 +66,9 @@ public class SysRegisterService
         {
             msg = "账户长度必须在2到20个字符之间";
         }
-        else if (password.length() < UserConstants.PASSWORD_MIN_LENGTH
-                || password.length() > UserConstants.PASSWORD_MAX_LENGTH)
+        else if (PasswordPolicy.validationError(username, password) != null)
         {
-            msg = "密码长度必须在5到20个字符之间";
+            msg = PasswordPolicy.validationError(username, password);
         }
         else if (!userService.checkUserNameUnique(sysUser))
         {

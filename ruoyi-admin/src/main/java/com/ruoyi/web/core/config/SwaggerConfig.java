@@ -101,7 +101,7 @@ public class SwaggerConfig
         {
             requestPath = requestPath.substring(pathMapping.length());
         }
-        return !Arrays.asList("/", "/login", "/register", "/captchaImage").contains(requestPath);
+        return !Arrays.asList("/", "/login", "/register", "/captchaImage", "/passwordPolicy").contains(requestPath);
     }
 
     /**

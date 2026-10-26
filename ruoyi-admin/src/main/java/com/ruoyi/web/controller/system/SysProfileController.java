@@ -18,6 +18,7 @@ import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.core.domain.model.LoginUser;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.DateUtils;
+import com.ruoyi.common.utils.PasswordPolicy;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.common.utils.file.FileUploadUtils;
@@ -96,10 +97,12 @@ public class SysProfileController extends BaseController
         LoginUser loginUser = getLoginUser();
         String userName = loginUser.getUsername();
         String password = loginUser.getPassword();
+        if (oldPassword == null || !PasswordPolicy.isSupportedLoginPassword(oldPassword)) return error("旧密码错误");
         if (!SecurityUtils.matchesPassword(oldPassword, password))
         {
             return error("修改密码失败，旧密码错误");
         }
+        PasswordPolicy.validate(userName, newPassword);
         if (SecurityUtils.matchesPassword(newPassword, password))
         {
             return error("新密码不能与旧密码相同");

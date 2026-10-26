@@ -16,6 +16,7 @@ import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
+import com.ruoyi.common.utils.PasswordPolicy;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.common.utils.bean.BeanValidators;
 import com.ruoyi.common.utils.spring.SpringUtils;
@@ -363,7 +364,7 @@ public class SysUserServiceImpl implements ISysUserService
     @Override
     public int resetPwd(SysUser user)
     {
-        return userMapper.updateUser(user);
+        return userMapper.resetUserPwdById(user);
     }
 
     /**
@@ -504,6 +505,8 @@ public class SysUserServiceImpl implements ISysUserService
                     BeanValidators.validateWithException(validator, user);
                     deptService.checkDeptDataScope(user.getDeptId());
                     String password = configService.selectConfigByKey("sys.user.initPassword");
+                    String policyError = PasswordPolicy.validationError(user.getUserName(), password);
+                    if (policyError != null) throw new ServiceException("导入初始密码不符合规则，请先修改参数sys.user.initPassword：" + policyError);
                     user.setPassword(SecurityUtils.encryptPassword(password));
                     user.setCreateBy(operName);
                     userMapper.insertUser(user);

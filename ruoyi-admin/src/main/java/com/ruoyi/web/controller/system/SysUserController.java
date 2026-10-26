@@ -24,6 +24,7 @@ import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
+import com.ruoyi.common.utils.PasswordPolicy;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.common.utils.poi.ExcelUtil;
@@ -139,6 +140,7 @@ public class SysUserController extends BaseController
             return error("新增用户'" + user.getUserName() + "'失败，邮箱账号已存在");
         }
         user.setCreateBy(getUsername());
+        PasswordPolicy.validate(user.getUserName(), user.getPassword());
         user.setPassword(SecurityUtils.encryptPassword(user.getPassword()));
         return toAjax(userService.insertUser(user));
     }
@@ -151,6 +153,7 @@ public class SysUserController extends BaseController
     @PutMapping
     public AjaxResult edit(@Validated @RequestBody SysUser user)
     {
+        if (StringUtils.isNotEmpty(user.getPassword())) return error("请通过重置密码接口修改密码");
         userService.checkUserAllowed(user);
         userService.checkUserDataScope(user.getUserId());
         deptService.checkDeptDataScope(user.getDeptId());
@@ -196,6 +199,9 @@ public class SysUserController extends BaseController
     {
         userService.checkUserAllowed(user);
         userService.checkUserDataScope(user.getUserId());
+        SysUser target = userService.selectUserById(user.getUserId());
+        if (target == null) return error("用户不存在");
+        PasswordPolicy.validate(target.getUserName(), user.getPassword());
         user.setPassword(SecurityUtils.encryptPassword(user.getPassword()));
         user.setUpdateBy(getUsername());
         return toAjax(userService.resetPwd(user));

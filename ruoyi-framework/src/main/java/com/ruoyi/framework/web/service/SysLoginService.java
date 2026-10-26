@@ -21,6 +21,7 @@ import com.ruoyi.common.exception.user.UserNotExistsException;
 import com.ruoyi.common.exception.user.UserPasswordNotMatchException;
 import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.MessageUtils;
+import com.ruoyi.common.utils.PasswordPolicy;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.common.utils.ip.IpUtils;
 import com.ruoyi.framework.manager.AsyncManager;
@@ -143,8 +144,7 @@ public class SysLoginService
             throw new UserNotExistsException();
         }
         // 密码如果不在指定范围内 错误
-        if (password.length() < UserConstants.PASSWORD_MIN_LENGTH
-                || password.length() > UserConstants.PASSWORD_MAX_LENGTH)
+        if (!PasswordPolicy.isSupportedLoginPassword(password))
         {
             AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.LOGIN_FAIL, MessageUtils.message("user.password.not.match")));
             throw new UserPasswordNotMatchException();

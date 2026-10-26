@@ -11,6 +11,8 @@ import com.ruoyi.common.core.domain.entity.SysUser;
  */
 public interface SysUserMapper
 {
+    public int resetUserPwdById(SysUser user);
+
     /**
      * 根据条件分页查询用户列表
      * 
