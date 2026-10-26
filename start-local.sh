@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start this checkout's existing local data; never initialize or re-import a database.
+# Start Homebrew-managed dependencies and optionally this checkout's backend.
 set -euo pipefail
 cd "$(dirname "$0")"
 project_dir="$PWD"
@@ -10,36 +10,32 @@ if [[ -n "$mode" && "$mode" != "--deps-only" ]]; then
   exit 1
 fi
 fail() { echo "$*" >&2; exit 1; }
-[[ -f "$local_dir/application-local.yml" && -f "$local_dir/mysql/mysql.ibd" && -f "$local_dir/redis.conf" ]] ||
-  fail "Existing local configuration/data missing. See LOCAL_SETUP.md; no database was initialized."
+if [[ "$mode" != "--deps-only" ]]; then
+  [[ -f "$local_dir/application-local.yml" ]] || fail "Local backend configuration missing. See LOCAL_SETUP.md."
+fi
 mkdir -p "$local_dir/logs"
 umask 077
-mysql_bin="${RUOYI_MYSQL_BIN:-/opt/homebrew/opt/mysql@8.4/bin}"
-redis_bin="${RUOYI_REDIS_BIN:-/opt/homebrew/opt/redis/bin}"
-[[ -x "$mysql_bin/mysqld" && -x "$redis_bin/redis-server" ]] || fail "MySQL/Redis binaries missing; set RUOYI_MYSQL_BIN and RUOYI_REDIS_BIN."
+brew_bin="${RUOYI_BREW:-$(command -v brew || true)}"
+[[ -n "$brew_bin" ]] || brew_bin=/opt/homebrew/bin/brew
+[[ -x "$brew_bin" ]] || fail "Homebrew missing; set RUOYI_BREW."
+brew_prefix="$("$brew_bin" --prefix)"
+mysql_bin="${RUOYI_MYSQL_BIN:-$brew_prefix/opt/mysql@8.4/bin}"
+redis_bin="${RUOYI_REDIS_BIN:-$brew_prefix/opt/redis/bin}"
+[[ -x "$mysql_bin/mysqladmin" && -x "$redis_bin/redis-cli" ]] || fail "Install mysql@8.4 and redis with Homebrew first."
+[[ -f "$brew_prefix/var/mysql/mysql.ibd" ]] || fail "Existing global MySQL data missing; no database was initialized."
 
-mysql_ready() { "$mysql_bin/mysqladmin" --no-defaults --socket="$local_dir/mysql.sock" -u root ping --silent >/dev/null 2>&1; }
-if ! mysql_ready; then
-  if lsof -nP -iTCP:3306 -sTCP:LISTEN >/dev/null 2>&1; then fail "Port 3306 belongs to another MySQL instance; nothing was stopped."; fi
-  "$mysql_bin/mysqld" --no-defaults --basedir="$(dirname "$mysql_bin")" --datadir="$local_dir/mysql" \
-    --bind-address=127.0.0.1 --port=3306 --mysqlx=0 --socket="$local_dir/mysql.sock" \
-    --pid-file="$local_dir/mysql.pid" --log-error="$local_dir/logs/mysql.log" --daemonize
-  for attempt in {1..20}; do mysql_ready && break; sleep 1; done
-fi
-mysql_ready || fail "MySQL startup failed; see .local/logs/mysql.log."
-mysql_data_dir="$("$mysql_bin/mysql" --no-defaults --socket="$local_dir/mysql.sock" -u root --batch --skip-column-names -e 'SELECT @@datadir')"
-[[ "${mysql_data_dir%/}" == "$local_dir/mysql" ]] || fail "MySQL uses another data directory; no data changed."
-
+# launchd, configured through Homebrew, owns the processes and their data paths.
+HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" services start mysql@8.4
+HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" services start redis
+mysql_ready() { "$mysql_bin/mysqladmin" --no-defaults --protocol=TCP -h 127.0.0.1 -P 3306 ping --silent >/dev/null 2>&1; }
 redis_ready() { [[ "$("$redis_bin/redis-cli" -h 127.0.0.1 -p 6379 PING 2>/dev/null || true)" == "PONG" ]]; }
-if ! redis_ready; then
-  if lsof -nP -iTCP:6379 -sTCP:LISTEN >/dev/null 2>&1; then fail "Port 6379 is already occupied; nothing was stopped."; fi
-  "$redis_bin/redis-server" "$local_dir/redis.conf"
-  for attempt in {1..20}; do redis_ready && break; sleep 1; done
-fi
-redis_ready || fail "Redis startup failed; see .local/logs/redis.log."
-redis_data_dir="$("$redis_bin/redis-cli" -h 127.0.0.1 -p 6379 --raw CONFIG GET dir | tail -n 1)"
-[[ "$redis_data_dir" == "$local_dir/redis" ]] || fail "Redis uses another data directory; nothing was stopped."
-echo "MySQL and Redis ready; data belongs to this project."
+for attempt in {1..30}; do
+  if mysql_ready && redis_ready; then break; fi
+  sleep 1
+done
+mysql_ready || fail "MySQL is not ready; check brew services list and $brew_prefix/var/log/mysql.log."
+redis_ready || fail "Redis is not ready; check brew services list and $brew_prefix/var/log/redis.log."
+echo "Homebrew MySQL and Redis ready; data is stored outside the project."
 [[ "$mode" == "--deps-only" ]] && exit 0
 
 backend_pid="$(lsof -nP -t -iTCP:18080 -sTCP:LISTEN 2>/dev/null || true)"

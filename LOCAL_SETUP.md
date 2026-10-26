@@ -11,16 +11,16 @@ cd /Users/wxl/ai-stock-backend
 ./start-local.sh
 ```
 
-本项目现在独立管理 MySQL、Redis、后端和上传文件。已有数据、私有连接配置、持久化文件都在本仓库 `.local/` 内，不再依赖旧仓库。启动脚本只使用已有数据库，不初始化数据，也不重新导入 SQL；后端启动前会重新构建当前代码，避免使用旧 JAR。已启动的服务会复用，端口被其他项目占用时会明确报错。
+自 2026-10-26 起，本机 MySQL 和 Redis 统一由 Homebrew 管理，数据存放在全局目录；项目 `.local/` 只保留后端私有配置、上传文件及应用日志。启动脚本通过 `brew services start` 启动依赖，复用已有数据库，不初始化数据、不重新导入 SQL；后端启动前会重新构建当前代码。
 
 
 - 后端：http://127.0.0.1:18080
 - 前端：http://localhost:1024
 - 初始管理员：`admin` / `admin123`，登录时填写页面验证码。
 - 日志：`.local/logs/backend-console.log`
-- 数据库：`127.0.0.1:3306/ry-vue`，使用用户提供的 SQL，共 34 张表
+- 数据库：`127.0.0.1:3306/ry-vue`，使用用户提供的 SQL 及后续迁移，共 35 张表
 - Redis：`127.0.0.1:6379`
-- 数据、上传文件和随机生成的本地凭据位于忽略提交的 `.local/` 中。
+- 上传文件和本地凭据位于忽略提交的 `.local/` 中，数据库数据在项目外。
 
 默认只停止当前项目的后端，保留数据库和 Redis：
 
@@ -28,13 +28,39 @@ cd /Users/wxl/ai-stock-backend
 ./stop-local.sh
 ```
 
-需要停止全部本项目服务时：
+需要同时停止后端和共享的 Homebrew 数据库、Redis 时：
 
 ```bash
 ./stop-local.sh --all
 ```
 
-停止脚本先校验进程及数据目录，正常保存数据后退出，不删除数据。IDEA 与脚本只保留一个后端进程。
+停止脚本校验后端归属；`--all` 会额外调用 `brew services stop` 停止共享依赖，数据保留。IDEA 与脚本只保留一个后端进程。
+
+## Homebrew 服务管理（2026-10-26）
+
+本机依赖已从项目独立进程迁移到 Homebrew 的用户级服务，项目移除或切换工作树不再影响数据库数据位置。IDEA 仍连接 `127.0.0.1:3306/ry-vue` 和 `127.0.0.1:6379`，账号、密码和 JWT 密钥保持不变。
+
+```bash
+# 启动并设置用户登录后自动启动
+brew services start mysql@8.4
+brew services start redis
+
+# 查看状态
+brew services list
+
+# 停止并取消登录自动启动；停止前先结束使用数据库的后端
+brew services stop redis
+brew services stop mysql@8.4
+```
+
+只想临时运行可用 `brew services run`；重启可用 `brew services restart`。项目的 `./start-local.sh --deps-only` 和桌面“本地数据库”小工具也通过 Brew 管理服务。
+
+- MySQL 数据：`/opt/homebrew/var/mysql`；Socket：`/tmp/mysql.sock`；配置：`/opt/homebrew/etc/my.cnf`。
+- Redis 数据：`/opt/homebrew/var/db/redis`；配置：`/opt/homebrew/etc/redis.conf`；已保留 AOF 持久化。
+- 数据库服务日志：`/opt/homebrew/var/log/mysql.log`、`/opt/homebrew/var/log/redis.log`。
+- 迁移前的完整数据目录、SQL 逻辑备份和旧 Brew 目录保存在 `~/Library/Application Support/ai-stock-services/backups/` 的时间戳目录中，权限为当前用户私有。迁移校验覆盖了全部 35 张业务表的行数。
+
+以下历史迁移记录中关于 `.local/mysql` 和 `.local/redis` 的路径已被本节取代。
 
 ## 依赖与重新编译
 
@@ -42,7 +68,7 @@ cd /Users/wxl/ai-stock-backend
 
 业务代码相同并不代表本地配置相同：`.local/` 被 Git 忽略，克隆不会带上数据库凭据、上传文件或数据库数据。直接运行 `RuoYiApplication` 只激活默认 `druid` 配置，会使用 `application-druid.yml` 中的示例 `root / password`。
 
-本机 `/Users/wxl/ai-stock-backend` 已准备私有 `.local/application-local.yml`，数据库、Redis 数据、JWT 密钥和上传目录均已迁入当前项目，无需重新导入 SQL。先运行以下命令启动数据库和 Redis，再在 IDEA 运行配置中选择 **RuoYi-local**，使用 `ruoyi-admin` 模块启动：
+本机 `/Users/wxl/ai-stock-backend` 已准备私有 `.local/application-local.yml`，数据库与 Redis 使用全局 Homebrew 服务，无需重新导入 SQL。先运行以下命令启动依赖，再在 IDEA 运行配置中选择 **RuoYi-local**，使用 `ruoyi-admin` 模块启动：
 
 ```bash
 ./start-local.sh --deps-only
@@ -54,9 +80,9 @@ cd /Users/wxl/ai-stock-backend
 --spring.profiles.active=druid,local --spring.config.additional-location=file:./.local/
 ```
 
-启动日志应同时出现 `druid`、`local` 两个 profile，后端端口为 `18080`。同一时间只运行一个后端实例。当前 MySQL 数据目录是 `.local/mysql`，Redis 数据目录是 `.local/redis`，上传目录是 `.local/uploads`，三者均属于本项目。
+启动日志应同时出现 `druid`、`local` 两个 profile，后端端口为 `18080`。同一时间只运行一个后端实例。当前 MySQL 数据目录为 `/opt/homebrew/var/mysql`，Redis 数据目录为 `/opt/homebrew/var/db/redis`；只有上传目录 `.local/uploads` 属于本项目。
 
-其他机器克隆后，需要准备对应的 `.local/application-local.yml`、数据库数据和 Redis 配置；启动脚本发现缺失时会停止，不会新建空库。运行配置不包含数据库密码，私有配置不得提交。
+其他机器克隆后，需要准备 `.local/application-local.yml` 和对应的全局数据库、Redis 服务；启动脚本不会新建空库。运行配置不包含数据库密码，私有配置不得提交。
 
 MySQL 8.4 与 Redis 使用 Homebrew 安装。当前 Java 使用本机 PyCharm 自带的 JBR 25，已用于构建和启动；脚本也支持通过 `RUOYI_JAVA_HOME` 指定 Java 路径，或自动使用已安装的 Homebrew JDK 17。Maven 3.9.9 位于 `/Users/wxl/.local/share/aigupiao-tools/apache-maven-3.9.9`。
 
