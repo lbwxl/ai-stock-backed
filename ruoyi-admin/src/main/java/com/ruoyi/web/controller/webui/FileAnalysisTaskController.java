@@ -18,6 +18,9 @@ import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.util.UriUtils;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @RestController
 @RequestMapping("/webui/file-analysis")
@@ -44,6 +47,34 @@ public class FileAnalysisTaskController extends BaseController {
     @PreAuthorize("@ss.hasPermi('webui:fileAnalysis:query')")
     @GetMapping("/records/{id}")
     public AjaxResult record(@PathVariable Long id){return success(service.getAdmin(id));}
+
+    @PreAuthorize("@ss.hasPermi('webui:fileAnalysis:edit')")
+    @PostMapping(value="/records/{id}/result-files", consumes="multipart/form-data")
+    public AjaxResult uploadResults(@PathVariable Long id, @RequestPart("files") MultipartFile[] files) {
+        return traced(() -> success(service.uploadResults(id, getUserId(), getUsername(), files)));
+    }
+
+    @GetMapping("/tasks/{id}/result-files/{fileId}/download")
+    public ResponseEntity<byte[]> downloadOwnResult(@PathVariable Long id, @PathVariable String fileId) {
+        return traced(() -> attachment(service.downloadResult(id, fileId, getUserId(), false)));
+    }
+
+    @PreAuthorize("@ss.hasPermi('webui:fileAnalysis:query')")
+    @GetMapping("/records/{id}/result-files/{fileId}/download")
+    public ResponseEntity<byte[]> downloadAdminResult(@PathVariable Long id, @PathVariable String fileId) {
+        return traced(() -> attachment(service.downloadResult(id, fileId, getUserId(), true)));
+    }
+
+    private ResponseEntity<byte[]> attachment(FileAnalysisUpload file) {
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).contentLength(file.getSize())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(file.fileName, StandardCharsets.UTF_8).build().toString())
+                .header("Download-Filename", UriUtils.encodePathSegment(file.fileName, StandardCharsets.UTF_8))
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .header("X-Request-Id", MDC.get("fileAnalysisRequestId"))
+                .header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Disposition, Download-Filename, X-Request-Id")
+                .body(file.getBytes());
+    }
 
     @PreAuthorize("@ss.hasPermi('webui:fileAnalysis:query')")
     @GetMapping("/records/{id}/download")
@@ -84,5 +115,15 @@ public class FileAnalysisTaskController extends BaseController {
         JSONObject body=new JSONObject();body.put("requestId",requestId);body.put("code",error.getCode());body.put("message",error.getMessage());
         logger.warn("stage=task_request_failed requestId={} code={}",requestId,error.getCode());
         return ResponseEntity.status(error.getStatus()).body(body);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<?> uploadTooLarge(MaxUploadSizeExceededException error) {
+        return failure(new FileAnalysisException(413,"FILE_TOO_LARGE","文件超过上传限制，单文件不超过 10MB，每批不超过 20MB，请分批上传"));
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<?> missingFiles(MissingServletRequestPartException error) {
+        return failure(new FileAnalysisException(400,"INVALID_RESULT_FILES","请选择要上传的结果文件"));
     }
 }

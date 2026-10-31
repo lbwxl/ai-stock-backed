@@ -3,6 +3,8 @@ package com.ruoyi.webui.task;
 import com.ruoyi.common.core.domain.BaseEntity;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.util.Date;
+import java.util.List;
+import java.util.Collections;
 
 /** Persistent file-analysis record. Does not contain model or storage credentials. */
 public class FileAnalysisTask extends BaseEntity {
@@ -24,6 +26,9 @@ public class FileAnalysisTask extends BaseEntity {
     private String processingRequirement;
     private String analysisRequirement;
     private String analysisText;
+    private List<FileAnalysisResultFile> resultFiles = Collections.emptyList();
+    public List<FileAnalysisResultFile> getResultFiles() { return resultFiles; }
+    public void setResultFiles(List<FileAnalysisResultFile> value) { resultFiles = value; }
     private String status;
     private String processingMode;
     private String modelName;

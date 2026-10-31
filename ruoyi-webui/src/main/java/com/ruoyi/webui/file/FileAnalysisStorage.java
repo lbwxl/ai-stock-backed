@@ -190,19 +190,24 @@ public class FileAnalysisStorage {
     public String fileId(Long userId, String fileUrl) { directory(userId, idFromUrl(userId, fileUrl)); return idFromUrl(userId, fileUrl); }
 
     public synchronized FileAnalysisReference retainForRecord(Long userId, String fileUrl) {
+        // Task input still requires a URL the model can reach.
+        if (minio == null) publicBaseUrl();
+        retainForDownload(userId, fileUrl);
+        return modelReference(userId, URL_PREFIX + fileId(userId, fileUrl));
+    }
+
+    /** Result attachments only need authenticated download, never a public/model URL. */
+    public synchronized void retainForDownload(Long userId, String fileUrl) {
         String id = fileId(userId, fileUrl);
         if (minio != null) {
             if (!remote(userId, fileUrl)) migrateLocal(userId, fileUrl);
             minio.retainForRecord(userId, id);
         } else {
-            // A failed task creation must not pin a temporary upload indefinitely.
-            publicBaseUrl();
             JSONObject metadata = describe(userId, fileUrl);
             metadata.put("expiresAt", RECORD_RETENTION); metadata.put("recordOwned", true);
             try { Files.write(directory(userId, id).resolve("metadata.json"), metadata.toJSONString().getBytes(StandardCharsets.UTF_8)); }
             catch (IOException e) { throw new FileAnalysisException(500, "FILE_STORAGE_UNAVAILABLE", "文件保留状态保存失败"); }
         }
-        return modelReference(userId, URL_PREFIX + id);
     }
 
     private synchronized FileAnalysisReference migrateLocal(Long userId, String fileUrl) {

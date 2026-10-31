@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.webui.mapper.FileAnalysisResultFileMapper">
+  <resultMap id="file" type="com.ruoyi.webui.task.FileAnalysisResultFile">
+    <id property="id" column="id"/>
+    <result property="taskId" column="task_id"/>
+    <result property="storageUserId" column="storage_user_id"/>
+    <result property="fileName" column="file_name"/>
+    <result property="mimeType" column="mime_type"/>
+    <result property="fileSize" column="file_size"/>
+    <result property="published" column="published"/>
+    <result property="createBy" column="create_by"/>
+  </resultMap>
+  <insert id="insert">
+    INSERT INTO file_analysis_result_file(id,task_id,storage_user_id,file_name,mime_type,file_size,create_by)
+    VALUES(#{id},#{taskId},#{storageUserId},#{fileName},#{mimeType},#{fileSize},#{createBy})
+  </insert>
+  <select id="selectById" resultMap="file">
+    SELECT * FROM file_analysis_result_file WHERE id=#{id}
+  </select>
+  <select id="selectPublished" resultMap="file">
+    SELECT * FROM file_analysis_result_file WHERE task_id=#{taskId} AND published=1 ORDER BY create_time,id
+  </select>
+  <update id="unpublish">
+    UPDATE file_analysis_result_file SET published=0 WHERE task_id=#{taskId} AND published=1
+  </update>
+  <update id="publish">
+    UPDATE file_analysis_result_file SET published=1 WHERE task_id=#{taskId} AND id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </update>
+</mapper>

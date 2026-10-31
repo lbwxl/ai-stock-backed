@@ -31,11 +31,11 @@
 
 - `POST /webui/file-analysis/tasks`：JSON 字段 `fileUrl`、`processingRequirement`、`analysisRequirement`，均必填；返回若依 `{code:200,data:{id,status:"NOT_STARTED",...}}`。不等待模型完成，同一上传文件只创建一条任务。
 - `GET /webui/file-analysis/tasks?pageNum=1&pageSize=10&status=&fileName=`：当前用户分页记录，返回 `{code:200,rows:[],total:0}`。列表不返回完整分析正文及文件签名地址。
-- `GET /webui/file-analysis/tasks/{id}`：当前用户记录详情，返回 `{code:200,data:{...}}`，含两项要求、`analysisText`、状态、处理方式、模型名称、失败原因、时间及新签发的完整 `fileUrl`。
+- `GET /webui/file-analysis/tasks/{id}`：当前用户记录详情，返回 `{code:200,data:{...}}`，含两项要求、`analysisText`、已发布的 `resultFiles`、状态、处理方式、模型名称、失败原因、时间及新签发的完整 `fileUrl`。
 - `GET /webui/file-analysis/records/list`：后台分页查询，可加 `userName`、`userId`、文件名和状态筛选。
 - `GET /webui/file-analysis/records/{id}`：后台查看详情。
 - `GET /webui/file-analysis/records/{id}/download`：后台下载该记录归属用户的原文件，使用查询权限鉴权，不受分析状态限制；返回原始字节、附件下载头及 UTF-8 编码的 `Download-Filename` 响应头。后台列表和详情弹窗均有“下载文件”按钮。文件由后端从存储读取，不依赖旧签名 URL，也不把业务 JWT 发给 MinIO；文件不存在或无权限时返回错误，不生成下载文件。
-- `PUT /webui/file-analysis/records`：后台只接受 `id`、读取时的 `version` 和非空 `analysisText`（最多 1048576 字符）。保存后系统自动更新状态为分析成功，记录维护人和完成时间；文件、归属用户、两项要求及开始时间保持不变。额外提交文件地址、要求、状态等字段返回 HTTP 400；自动处理导致的旧版本可保存；其他人工维护已更新结果或提交未来版本时返回 HTTP 409，页面显示具体原因并保留草稿。原文件不可用时仍可维护分析结果。原上传替换文件接口已移除。
+- `PUT /webui/file-analysis/records`：后台上传文件模式提交 `id`、读取时的 `version` 和非空 `resultFileIds`，详见文末“后台上传分析结果文件”。旧客户端提交非空 `analysisText`（最多 1048576 字符）仍兼容。保存后系统自动更新状态为分析成功，记录维护人和完成时间；文件、归属用户、两项要求及开始时间保持不变。额外提交文件地址、要求、状态等字段返回 HTTP 400；自动处理导致的旧版本可保存；其他人工维护已更新结果或提交未来版本时返回 HTTP 409，页面显示具体原因并保留草稿。原文件不可用时仍可维护分析结果。原上传替换文件接口已移除。
 
 关联记录的原文件会长期保留，不受临时上传默认 24 小时过期清理影响；临时删除接口会返回 `409 FILE_IN_USE`。完整访问链接仍有签名有效期，每次查看详情会重新签发。文件在外部被移除或存储暂时不可用时，记录和分析结果仍可查看，详情通过 `fileAvailable=false`、`fileErrorMessage` 表示文件异常。MinIO 生命周期策略应避免按上传天数删除已关联记录的文件。
 
@@ -296,3 +296,22 @@ rg -F '具体请求编号' .local/logs/file-analysis.log
 ```
 
 上传与分析响应包含 `requestId`；同一次请求的各阶段使用相同编号。正常响应同时返回 `X-Request-Id` 头。日志只记录用户 ID、文件 ID、MIME/大小、模型名、HTTP 状态、错误码、耗时和结果长度，不记录密钥、业务 JWT、完整签名 URL、文件正文、完整提示词或模型分析正文。
+
+
+## 后台上传分析结果文件（2026-10-30）
+
+先执行增量迁移 `sql/file_analysis_result_files_20261030.sql`，再重新构建并启动后端。迁移仅新增结果附件表，保留历史任务和文字结果。
+
+- `POST /webui/file-analysis/records/{id}/result-files`：需 `webui:fileAnalysis:edit`，使用 multipart 的多个 `files` 字段上传，可混合 Word、PDF、图片等文件；每批 1～20 个，单文件上限沿用存储配置（默认 10MB），请求总大小沿用 Spring multipart 配置（默认 20MB）。上传返回 `data: [{id,fileName,mimeType,fileSize}]`，此时为未发布草稿。
+- `PUT /webui/file-analysis/records`：提交 `{id,version,resultFileIds:["附件UUID",...]}`，保留 1～20 个附件；只接受当前记录的已发布附件或当前维护人上传的草稿。保存时保留文件、原子更新发布列表及任务状态为 `SUCCEEDED/MANUAL`；前台随即可查看下载列表。未选择的旧附件退出发布列表，不能继续通过结果下载接口访问。版本冲突返回 409 并保留前端草稿。此模式不同时接受 `analysisText`，旧客户端文字维护接口保留兼容。
+- `GET /webui/file-analysis/tasks/{id}`：当前用户的详情新增 `resultFiles` 元数据列表；未保存的上传不出现在列表中。历史文字/自动分析结果仍由 `analysisText` 返回。
+- `GET /webui/file-analysis/tasks/{id}/result-files/{fileId}/download`：用户下载自己的已发布结果，其他用户、其他任务或未发布文件返回 404。
+- `GET /webui/file-analysis/records/{id}/result-files/{fileId}/download`：管理端下载，需 `webui:fileAnalysis:query`。
+
+所有结果下载均使用业务 JWT（`Authorization: Bearer ...`），返回附件字节、原文件名及 `application/octet-stream`，带 `Content-Disposition: attachment`、`Download-Filename`、`nosniff` 和私有缓存头。前端不拼接 MinIO 地址，不把 token 放 URL，不内联执行上传内容。
+
+附件保存在上传维护人的私有存储空间，并绑定任务，前台仅通过任务归属检查后下载。已发布文件长期保留，草稿未保存则沿用临时上传有效期。上传失败批次回滚新建元数据并清理已传临时文件。附件发布和下载不调用模型，也不依赖模型公网文件入口或原始输入文件是否可用。后台取消编辑不会改动已发布结果，移除附件需保存后生效。
+
+针对该功能的回归测试包括 `FileAnalysisResultFilesTest`、`FileAnalysisTaskServiceTest`，管理前端 `node --test tests/file-analysis-results.test.mjs`，前台 `npm run test:file`。
+
+真实本地 MySQL/MinIO 联调可执行 `node tests/verify-file-analysis-results.mjs --live`，需通过环境提供 `MYSQL_PWD`、可维护记录和新增测试用户的 `TEST_USERNAME`/`TEST_PASSWORD`（不修改已有用户）；数据库账号默认 `ruoyi_local`，可由 `TEST_DB_USER` 指定。脚本创建隔离用户和人工任务，不调用真实模型，结束后清理测试账号、记录及上传对象。

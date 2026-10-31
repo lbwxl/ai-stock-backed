@@ -3,6 +3,7 @@ package com.ruoyi.web.controller.webui;
 import com.alibaba.fastjson2.JSONObject;
 import com.ruoyi.webui.file.*;
 import com.ruoyi.webui.mapper.FileAnalysisTaskMapper;
+import com.ruoyi.webui.mapper.FileAnalysisResultFileMapper;
 import com.ruoyi.webui.task.*;
 import java.util.*;
 import java.util.concurrent.Executor;
@@ -11,9 +12,12 @@ import java.util.function.Supplier;
 import org.junit.*;
 import org.springframework.beans.BeanUtils;
 import static org.junit.Assert.*;
+import org.springframework.mock.web.MockMultipartFile;
 
 public class FileAnalysisTaskServiceTest {
     private Memory mapper;
+    private MemoryResults files;
+    private Map<String,FileAnalysisUpload> stored;
     private FileAnalysisTaskService service;
     private Supplier<FileAnalysisResult> result;
     private AtomicInteger calls;
@@ -22,19 +26,25 @@ public class FileAnalysisTaskServiceTest {
     private String downloadedUrl;
     private static final String FILE="12345678-1234-1234-1234-123456789abc";
     @Before public void setup() {
-        mapper=new Memory();calls=new AtomicInteger();pins=new AtomicInteger();
+        mapper=new Memory();files=new MemoryResults();stored=new HashMap<>();calls=new AtomicInteger();pins=new AtomicInteger();
         result=()->new FileAnalysisResult("request","fixture.pdf","自动分析结果");
         FileAnalysisStorage storage=new FileAnalysisStorage(new FileAnalysisProperties()) {
-            @Override public String fileId(Long user,String url){return FILE;}
+            @Override public String fileId(Long user,String url){return url.substring(url.length()-36);}
+            @Override public JSONObject upload(Long user,org.springframework.web.multipart.MultipartFile file){
+                FileAnalysisUpload upload=FileAnalysisUpload.read(file,1024*1024);String id=UUID.randomUUID().toString();stored.put(id,upload);
+                JSONObject metadata=new JSONObject();metadata.put("fileUrl",URL_PREFIX+id);metadata.put("fileName",upload.fileName);metadata.put("mimeType",upload.mimeType);metadata.put("size",upload.getSize());return metadata;
+            }
+            @Override public void retainForDownload(Long user,String url){if(!stored.containsKey(fileId(user,url)))throw new FileAnalysisException(404,"FILE_NOT_FOUND","文件不存在");}
+            @Override public void delete(Long user,String url){stored.remove(fileId(user,url));}
             @Override public FileAnalysisReference retainForRecord(Long user,String url){pins.incrementAndGet();return modelReference(user,url);}
             @Override public FileAnalysisReference modelReference(Long user,String url){return new FileAnalysisReference("fixture.pdf","application/pdf",20,"https://files.example.test/ai-file/file-analysis/"+user+"/"+FILE+"?signed=fixture");}
-            @Override public FileAnalysisUpload load(Long user,String url){downloadedOwner=user;downloadedUrl=url;return new FileAnalysisUpload("原文件 测试.pdf","application/pdf",new byte[]{1,2,3});}
+            @Override public FileAnalysisUpload load(Long user,String url){downloadedOwner=user;downloadedUrl=url;FileAnalysisUpload found=stored.get(fileId(user,url));return found!=null?found:new FileAnalysisUpload("原文件 测试.pdf","application/pdf",new byte[]{1,2,3});}
         };
         FileAnalysisService analysis=new FileAnalysisService(null,null,new FileAnalysisProperties(),Collections.emptyList()) {
             @Override public String currentModelName(Long user){return "configured-user-model";}
             @Override public FileAnalysisResult analyzeForTask(Long user,String request,FileAnalysisReference file,String processing,String requirement){calls.incrementAndGet();return result.get();}
         };
-        service=new FileAnalysisTaskService(mapper,storage,analysis,Runnable::run,"unit-worker");
+        service=new FileAnalysisTaskService(mapper,files,storage,analysis,Runnable::run,"unit-worker");
     }
     private JSONObject creation(){JSONObject body=new JSONObject();body.put("fileUrl","https://files.example.test/"+FILE);body.put("processingRequirement","处理要求");body.put("analysisRequirement","分析要求");return body;}
     private FileAnalysisTask create(){return service.create(11L,"fixture-user",creation());}
@@ -127,13 +137,70 @@ public class FileAnalysisTaskServiceTest {
     @Test public void dispatchAndRecoveryPreserveManualWorkAndDoNotQueueTheSamePendingIdTwice() {
         FileAnalysisTask task=create();List<Runnable> queue=new ArrayList<>();
         FileAnalysisStorage storage=new FileAnalysisStorage(new FileAnalysisProperties());
-        FileAnalysisTaskService queuedService=new FileAnalysisTaskService(mapper,storage,null,queue::add,"unit-worker");
+        FileAnalysisTaskService queuedService=new FileAnalysisTaskService(mapper,files,storage,null,queue::add,"unit-worker");
         queuedService.dispatch();queuedService.dispatch();assertEquals(1,queue.size());
         mapper.claim(task.getId(),"recover-request","unit-worker");queuedService.recover();assertEquals("NOT_STARTED",mapper.selectById(task.getId()).getStatus());
         result=()->{throw new FileAnalysisException(503,"FILE_MANUAL_REVIEW_REQUIRED","人工维护");};
         service.run(task.getId());queuedService.recover();assertEquals("PROCESSING",mapper.selectById(task.getId()).getStatus());assertEquals("MANUAL",mapper.selectById(task.getId()).getProcessingMode());
     }
 
+    private List<FileAnalysisResultFile> uploadResults(FileAnalysisTask task,String actor) {
+        return service.uploadResults(task.getId(),1L,actor,new MockMultipartFile[]{
+            new MockMultipartFile("files","自然资源巡查影像分析报告.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",new byte[]{80,75,3,4}),
+            new MockMultipartFile("files","自然资源巡查问题标注图.png","image/png",new byte[]{(byte)137,80,78,71})
+        });
+    }
+    private JSONObject fileUpdate(FileAnalysisTask task,List<FileAnalysisResultFile> uploads) {
+        JSONObject body=new JSONObject();body.put("id",task.getId());body.put("version",task.getVersion());
+        List<String> ids=new ArrayList<>();for(FileAnalysisResultFile file:uploads)ids.add(file.getId());body.put("resultFileIds",ids);return body;
+    }
+    @Test public void mixedResultFilesArePrivateUntilSavedThenDownloadOriginalBytesWithoutCallingModel() {
+        FileAnalysisTask task=create();List<FileAnalysisResultFile> uploads=uploadResults(task,"maintainer");
+        assertEquals(2,uploads.size());assertTrue(service.getOwn(task.getId(),11L).getResultFiles().isEmpty());
+        try{service.downloadResult(task.getId(),uploads.get(0).getId(),11L,false);fail();}catch(FileAnalysisException e){assertEquals("RESULT_FILE_NOT_FOUND",e.getCode());}
+        service.maintain("maintainer",fileUpdate(task,uploads));
+        FileAnalysisTask completed=service.getOwn(task.getId(),11L);assertEquals(2,completed.getResultFiles().size());assertEquals("SUCCEEDED",completed.getStatus());assertEquals("MANUAL",completed.getProcessingMode());assertNull(completed.getAnalysisText());
+        FileAnalysisUpload doc=service.downloadResult(task.getId(),uploads.get(0).getId(),11L,false);
+        assertEquals("自然资源巡查影像分析报告.docx",doc.fileName);assertArrayEquals(new byte[]{80,75,3,4},doc.getBytes());assertEquals(Long.valueOf(1),downloadedOwner);
+        assertArrayEquals(new byte[]{(byte)137,80,78,71},service.downloadResult(task.getId(),uploads.get(1).getId(),1L,true).getBytes());
+        try{service.downloadResult(task.getId(),uploads.get(0).getId(),22L,false);fail();}catch(FileAnalysisException e){assertEquals("TASK_NOT_FOUND",e.getCode());}
+        assertEquals(0,calls.get());
+    }
+    @Test public void attachmentEditsRespectVersionAndRemovedFilesCannotBeDownloaded() {
+        FileAnalysisTask task=create();List<FileAnalysisResultFile> uploads=uploadResults(task,"maintainer");service.maintain("maintainer",fileUpdate(task,uploads));
+        try{service.maintain("maintainer",fileUpdate(task,uploads));fail();}catch(FileAnalysisException e){assertEquals("TASK_VERSION_CONFLICT",e.getCode());}
+        FileAnalysisTask current=service.getAdmin(task.getId());service.maintain("maintainer",fileUpdate(current,Collections.singletonList(uploads.get(1))));
+        assertEquals(1,service.getOwn(task.getId(),11L).getResultFiles().size());
+        try{service.downloadResult(task.getId(),uploads.get(0).getId(),11L,false);fail();}catch(FileAnalysisException e){assertEquals("RESULT_FILE_NOT_FOUND",e.getCode());}
+    }
+    @Test public void invalidForeignAndOtherMaintainersDraftAttachmentsAreRejected() {
+        FileAnalysisTask task=create();List<FileAnalysisResultFile> uploads=uploadResults(task,"maintainer");
+        try{service.maintain("other-maintainer",fileUpdate(task,uploads));fail();}catch(FileAnalysisException e){assertEquals("INVALID_RESULT_FILES",e.getCode());}
+        FileAnalysisTask other=mapper.copy(task);other.setId(99L);mapper.rows.put(99L,other);
+        try{service.maintain("maintainer",fileUpdate(other,uploads));fail();}catch(FileAnalysisException e){assertEquals("INVALID_RESULT_FILES",e.getCode());}
+        for(Object invalid:Arrays.asList(Collections.emptyList(),Arrays.asList(uploads.get(0).getId(),uploads.get(0).getId()),Arrays.asList("../bad"),Arrays.asList(7),Collections.nCopies(21,uploads.get(0).getId()),"bad")) {
+            JSONObject body=fileUpdate(task,uploads);body.put("resultFileIds",invalid);
+            try{service.maintain("maintainer",body);fail();}catch(FileAnalysisException e){assertEquals("INVALID_RESULT_FILES",e.getCode());}
+        }
+        JSONObject mixed=fileUpdate(task,uploads);mixed.put("analysisText","invalid");
+        try{service.maintain("maintainer",mixed);fail();}catch(FileAnalysisException e){assertEquals("INVALID_REQUEST",e.getCode());}
+        assertEquals("NOT_STARTED",service.getOwn(task.getId(),11L).getStatus());
+    }
+    @Test public void failedBatchUploadCleansItsFilesWithoutPublishingAnyResult() {
+        FileAnalysisTask task=create();
+        try{service.uploadResults(task.getId(),1L,"maintainer",new MockMultipartFile[]{new MockMultipartFile("files","a.txt","text/plain",new byte[]{1}),new MockMultipartFile("files","empty.txt","text/plain",new byte[0])});fail();}
+        catch(FileAnalysisException e){assertEquals("INVALID_REQUEST",e.getCode());}
+        assertTrue(stored.isEmpty());assertTrue(service.getOwn(task.getId(),11L).getResultFiles().isEmpty());
+    }
+
+    static class MemoryResults implements FileAnalysisResultFileMapper {
+        final Map<String,FileAnalysisResultFile> rows=new LinkedHashMap<>();
+        public int insert(FileAnalysisResultFile file){rows.put(file.getId(),file);return 1;}
+        public FileAnalysisResultFile selectById(String id){return rows.get(id);}
+        public List<FileAnalysisResultFile> selectPublished(Long task){List<FileAnalysisResultFile> out=new ArrayList<>();for(FileAnalysisResultFile file:rows.values())if(task.equals(file.getTaskId())&&file.isPublished())out.add(file);return out;}
+        public int unpublish(Long task){int count=0;for(FileAnalysisResultFile file:rows.values())if(task.equals(file.getTaskId())&&file.isPublished()){file.setPublished(false);count++;}return count;}
+        public int publish(Long task,List<String> ids){int count=0;for(String id:ids){FileAnalysisResultFile file=rows.get(id);if(file!=null&&task.equals(file.getTaskId())){file.setPublished(true);count++;}}return count;}
+    }
     static class Memory implements FileAnalysisTaskMapper {
         final Map<Long,FileAnalysisTask> rows=new LinkedHashMap<>();final Map<Long,String> workers=new HashMap<>();long sequence;
         FileAnalysisTask copy(FileAnalysisTask task){if(task==null)return null;FileAnalysisTask out=new FileAnalysisTask();BeanUtils.copyProperties(task,out);return out;}

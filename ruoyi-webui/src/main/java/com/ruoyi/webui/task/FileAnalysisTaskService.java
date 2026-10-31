@@ -3,6 +3,7 @@ package com.ruoyi.webui.task;
 import com.alibaba.fastjson2.JSONObject;
 import com.ruoyi.webui.file.*;
 import com.ruoyi.webui.mapper.FileAnalysisTaskMapper;
+import com.ruoyi.webui.mapper.FileAnalysisResultFileMapper;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.*;
@@ -13,6 +14,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class FileAnalysisTaskService {
@@ -20,16 +22,17 @@ public class FileAnalysisTaskService {
     private static final Set<String> STATUSES = new HashSet<>(Arrays.asList(NOT_STARTED,PROCESSING,SUCCEEDED,FAILED));
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(FileAnalysisTaskService.class);
     private final FileAnalysisTaskMapper mapper;
+    private final FileAnalysisResultFileMapper resultFiles;
     private final FileAnalysisStorage storage;
     private final FileAnalysisService analysis;
     private final Executor executor;
     private final String workerId;
     private final Set<Long> queued = ConcurrentHashMap.newKeySet();
 
-    public FileAnalysisTaskService(FileAnalysisTaskMapper mapper, FileAnalysisStorage storage, FileAnalysisService analysis,
+    public FileAnalysisTaskService(FileAnalysisTaskMapper mapper, FileAnalysisResultFileMapper resultFiles, FileAnalysisStorage storage, FileAnalysisService analysis,
             @Qualifier("fileAnalysisTaskExecutor") Executor executor,
             @Value("${webui.file-analysis.worker-id:${HOSTNAME:local}-${server.port:8080}}") String workerId) {
-        this.mapper=mapper; this.storage=storage; this.analysis=analysis; this.executor=executor; this.workerId=workerId;
+        this.mapper=mapper; this.resultFiles=resultFiles; this.storage=storage; this.analysis=analysis; this.executor=executor; this.workerId=workerId;
     }
 
     @Transactional
@@ -63,6 +66,44 @@ public class FileAnalysisTaskService {
 
     public FileAnalysisTask getAdmin(Long id) { return withFileUrl(required(id)); }
 
+    /** Upload drafts are bound to this task and remain invisible to its owner until saved. */
+    @Transactional
+    public List<FileAnalysisResultFile> uploadResults(Long id, Long actorId, String actor, MultipartFile[] files) {
+        required(id);
+        if (files == null || files.length == 0 || files.length > 20) throw fail(400,"INVALID_RESULT_FILES","每次请选择 1～20 个结果文件");
+        List<FileAnalysisResultFile> uploaded = new ArrayList<>();
+        try {
+            for (MultipartFile file : files) {
+                JSONObject metadata = storage.upload(actorId, file);
+                FileAnalysisResultFile result = new FileAnalysisResultFile();
+                result.setId(storage.fileId(actorId, metadata.getString("fileUrl")));
+                result.setTaskId(id); result.setStorageUserId(actorId); result.setCreateBy(actor);
+                result.setFileName(metadata.getString("fileName")); result.setMimeType(metadata.getString("mimeType"));
+                result.setFileSize(metadata.getLong("size"));
+                uploaded.add(result);
+                resultFiles.insert(result);
+            }
+            return uploaded;
+        } catch (RuntimeException error) {
+            for (FileAnalysisResultFile result : uploaded) {
+                try { storage.delete(actorId, FileAnalysisStorage.URL_PREFIX + result.getId()); }
+                catch (RuntimeException ignored) { /* Expiry cleanup retries abandoned drafts. */ }
+            }
+            throw error;
+        }
+    }
+
+    /** Never trust a browser-supplied storage URL, user ID, or file name. */
+    public FileAnalysisUpload downloadResult(Long id, String fileId, Long userId, boolean admin) {
+        FileAnalysisTask task = required(id);
+        if (!admin && !task.getUserId().equals(userId)) throw missing();
+        FileAnalysisResultFile file = resultFiles.selectById(fileId);
+        if (file == null || !id.equals(file.getTaskId()) || !file.isPublished() || !SUCCEEDED.equals(task.getStatus())) {
+            throw fail(404,"RESULT_FILE_NOT_FOUND","结果文件不存在或尚未发布");
+        }
+        return storage.load(file.getStorageUserId(), FileAnalysisStorage.URL_PREFIX + file.getId());
+    }
+
     /** The controller checks admin query permission; storage reads the record owner's file. */
     public FileAnalysisUpload downloadFile(Long id, String actor) {
         FileAnalysisTask task = required(id);
@@ -74,7 +115,7 @@ public class FileAnalysisTaskService {
 
     @Transactional
     public FileAnalysisTask maintain(String actor, JSONObject body) {
-        validateBody(body,new HashSet<>(Arrays.asList("id","version","analysisText")));
+        validateBody(body,new HashSet<>(Arrays.asList("id","version","analysisText","resultFileIds")));
         if (!(body.get("id") instanceof Number) || !(body.get("version") instanceof Number)) throw fail(400,"INVALID_REQUEST","缺少记录编号或版本号");
         Number version=(Number)body.get("version");
         long suppliedVersion=version.longValue();
@@ -88,9 +129,24 @@ public class FileAnalysisTaskService {
         boolean humanMaintained=(task.getUpdateBy()!=null && !task.getUpdateBy().trim().isEmpty())
                 || ("MANUAL".equals(task.getProcessingMode()) && task.getAnalysisText()!=null && !task.getAnalysisText().trim().isEmpty());
         if (suppliedVersion!=task.getVersion() && (suppliedVersion>task.getVersion() || humanMaintained)) throw conflict();
-        String result=text(body,"analysisText",1024*1024,false);
-        if (result.isEmpty()) throw fail(400,"EMPTY_ANALYSIS","请填写分析结果");
-        task.setAnalysisText(result);
+        if (body.containsKey("resultFileIds")) {
+            if (body.containsKey("analysisText")) throw fail(400,"INVALID_REQUEST","文件结果不能同时提交文字结果");
+            List<String> ids = validateResultFiles(task.getId(), actor, body.get("resultFileIds"));
+            // Pin only validated attachments. No model invocation or public signed URL is needed.
+            for (String fileId : ids) {
+                FileAnalysisResultFile file = resultFiles.selectById(fileId);
+                storage.retainForDownload(file.getStorageUserId(), FileAnalysisStorage.URL_PREFIX + fileId);
+            }
+            resultFiles.unpublish(task.getId());
+            if (resultFiles.publish(task.getId(), ids) != ids.size()) throw conflict();
+            task.setAnalysisText(null);
+        } else {
+            // Compatibility for existing clients and historical automatic text results.
+            String result=text(body,"analysisText",1024*1024,false);
+            if (result.isEmpty()) throw fail(400,"EMPTY_ANALYSIS","请上传至少一个分析结果文件");
+            task.setAnalysisText(result);
+            resultFiles.unpublish(task.getId());
+        }
         task.setStatus(SUCCEEDED); task.setProcessingMode("MANUAL");
         task.setErrorCode(null); task.setErrorMessage(null); task.setCompletedAt(new Date());
         task.setUpdateBy(actor);
@@ -149,9 +205,27 @@ public class FileAnalysisTaskService {
 
     private FileAnalysisTask required(Long id) { FileAnalysisTask task=mapper.selectById(id); if(task==null)throw missing(); return task; }
     private FileAnalysisTask withFileUrl(FileAnalysisTask task) {
+        task.setResultFiles(resultFiles.selectPublished(task.getId()));
         try { task.setFileUrl(storage.modelReference(task.getUserId(),FileAnalysisStorage.URL_PREFIX+task.getFileId()).url);task.setFileAvailable(true); }
         catch(FileAnalysisException e) { task.setFileUrl(null);task.setFileAvailable(false);task.setFileErrorMessage(e.getMessage()); }
         return task;
+    }
+    private List<String> validateResultFiles(Long taskId, String actor, Object value) {
+        if (!(value instanceof List)) throw fail(400,"INVALID_RESULT_FILES","结果文件列表格式不正确");
+        List<?> items = (List<?>) value;
+        if (items.isEmpty() || items.size() > 20) throw fail(400,"INVALID_RESULT_FILES","请上传 1～20 个分析结果文件");
+        List<String> ids = new ArrayList<>();
+        for (Object item : items) {
+            if (!(item instanceof String) || !((String)item).matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}") || ids.contains(item)) {
+                throw fail(400,"INVALID_RESULT_FILES","结果文件编号不正确或重复");
+            }
+            FileAnalysisResultFile file = resultFiles.selectById((String)item);
+            if (file == null || !taskId.equals(file.getTaskId()) || (!file.isPublished() && !actor.equals(file.getCreateBy()))) {
+                throw fail(400,"INVALID_RESULT_FILES","请使用当前记录中已上传的结果文件");
+            }
+            ids.add((String)item);
+        }
+        return ids;
     }
     private void applyFile(FileAnalysisTask task, FileAnalysisReference file) {
         task.setFileName(file.fileName);task.setMimeType(file.mimeType);task.setFileSize(file.size);
